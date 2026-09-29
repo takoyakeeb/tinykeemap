@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tinykeemap</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <h1>tinykeemap</h1>
+    <p class="lead">キーボードにUSBで接続して、キーマップを読み取ります(読み取り専用)。</p>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="conn-title">
+      <h2 id="conn-title">接続</h2>
+      <div class="row">
+        <button id="btn-connect" type="button">接続する</button>
+        <button id="btn-reload" type="button" disabled>再読み込み</button>
+        <button id="btn-disconnect" type="button" disabled>切断する</button>
+        <span id="status" class="status status-off">未接続</span>
+      </div>
+      <div id="error" class="error" role="alert" hidden></div>
+    </section>
+
+    <section class="panel" id="info-panel" aria-labelledby="info-title" hidden>
+      <h2 id="info-title">デバイス情報</h2>
+      <dl id="info" class="info"></dl>
+    </section>
+
+    <section class="panel" id="keymap-panel" aria-labelledby="keymap-title" hidden>
+      <h2 id="keymap-title">キーマップ</h2>
+      <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。</p>
+      <div id="keymap"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="log-title">
+      <h2 id="log-title">通信ログ</h2>
+      <pre id="log" class="log" aria-live="off"></pre>
+    </section>
+  </main>
+
+  <footer class="foot">MIT License</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
