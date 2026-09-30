@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tinykeemap</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
     <h1>tinykeemap</h1>
-    <p class="lead">キーボードにUSBで接続して、キーマップを読み取ります(読み取り専用)。</p>
+    <p class="lead">キーボードにUSBで接続して、キーマップを読み取り、1キーずつ変更します(保存機能は次の版で追加します)。</p>
   </header>
 
   <main>
@@ -31,8 +32,28 @@
 
     <section class="panel" id="keymap-panel" aria-labelledby="keymap-title" hidden>
       <h2 id="keymap-title">キーマップ</h2>
-      <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。</p>
+      <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。マスをクリックすると、下の「キーの編集」で変更できます。</p>
       <div id="keymap"></div>
+    </section>
+
+    <section class="panel" id="edit-panel" aria-labelledby="edit-title" hidden>
+      <h2 id="edit-title">キーの編集</h2>
+      <p class="hint">上のマスを選び、割り当てる keycode を選んで「変更する」を押します。変更はすぐにキーボードの入力へ反映されます。まだ保存していないので、USBを抜き差しすると保存済みの内容に戻ります。</p>
+      <p class="edit-target">選択中: <strong id="edit-target">(なし)</strong></p>
+      <div class="edit-grid">
+        <div class="edit-pick">
+          <label for="kc-search">名前で絞り込み</label>
+          <input id="kc-search" type="search" placeholder="例: A, Enter, F5, KC_ESC" autocomplete="off" disabled>
+          <select id="kc-list" size="10" aria-label="keycode の一覧" disabled></select>
+        </div>
+        <div class="edit-value">
+          <label for="kc-hex">keycode(16進、または名前)</label>
+          <input id="kc-hex" type="text" placeholder="0x0004" autocomplete="off" spellcheck="false" disabled>
+          <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
+          <button id="btn-set" type="button" disabled>変更する</button>
+        </div>
+      </div>
+      <div id="edit-msg" class="edit-msg" role="status" hidden></div>
     </section>
 
     <section class="panel" aria-labelledby="log-title">
@@ -43,6 +64,7 @@
 
   <footer class="foot">MIT License</footer>
 
+  <script src="keycodes.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

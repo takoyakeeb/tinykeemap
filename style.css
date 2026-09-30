@@ -17,7 +17,6 @@
 }
 
 * { box-sizing: border-box; }
-
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -120,6 +119,44 @@ button:focus-visible { outline: 3px solid #7fb8c2; outline-offset: 2px; }
 .cap.none .code { color: var(--off); }
 .cap.trans { background: #eaf4f6; border-color: #a9cdd3; }
 
+/* マスはクリックして選べる */
+/* 表(.grid)の横スクロール設定で外側が切れるので、枠は内側に描く */
+.cap.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.cap.set-failed { background: var(--err-bg); border-color: var(--err-ink); }
+
+/* キーの編集 */
+.edit-target { margin: 0 0 12px; }
+.edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.edit-grid label { display: block; margin-bottom: 4px; font-size: 0.9rem; color: var(--muted); }
+.edit-grid input,
+.edit-grid select {
+  width: 100%;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+.edit-grid input:disabled,
+.edit-grid select:disabled { background: #f4f5f7; color: var(--off); }
+.edit-grid select { margin-top: 8px; font-family: var(--mono); font-size: 0.9rem; }
+#kc-hex { font-family: var(--mono); }
+.kc-preview { min-height: 1.6em; margin: 6px 0 12px; color: var(--muted); font-size: 0.9rem; }
+.kc-preview.bad { color: var(--err-ink); }
+#btn-set { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+#btn-set:disabled { background: #c3d3d6; border-color: #c3d3d6; color: #fff; }
+.edit-msg { margin-top: 12px; padding: 10px 12px; border-radius: 6px; }
+.edit-msg[hidden] { display: none; }
+.edit-msg.ok { background: #e8f5ee; color: #14532d; }
+.edit-msg.fail { background: var(--err-bg); color: var(--err-ink); }
+.edit-msg.info { background: #eef2f6; color: var(--ink); }
+
 .log {
   margin: 0;
   max-height: 260px;
@@ -144,4 +181,5 @@ button:focus-visible { outline: 3px solid #7fb8c2; outline-offset: 2px; }
 @media (max-width: 520px) {
   .info { grid-template-columns: 1fr; gap: 0; }
   .info dd { margin-bottom: 6px; }
+  .edit-grid { grid-template-columns: 1fr; }
 }

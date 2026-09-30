@@ -1,10 +1,11 @@
-// tinykeemap 最小版 (読み取り専用)
+// tinykeemap (キーマップの表示と、1キーずつの変更)
 // 仕様: docs/protocol.md (Draft v1, proto=1)
+// keycode の名前の表・入力の解釈は keycodes.js(先に読み込む)
 //
 // 構成(上から順に、下の層は上の層を知らない):
 //   1. SerialLineTransport … WebSerial で「1行送る / 1行受け取る」だけ(USBの都合はここに閉じ込める)
-//   2. protocol … 1行の文字列 ⇔ INFO / DUMP の結果 の変換
-//   3. 画面 … ボタン・表・ログの表示
+//   2. protocol … 1行の文字列 ⇔ INFO / DUMP / SET の結果 の変換
+//   3. 画面 … ボタン・表・編集欄・ログの表示
 
 "use strict";
 
@@ -199,7 +200,7 @@ class SerialLineTransport {
 }
 
 /* ------------------------------------------------------------------ */
-/* 2. プロトコル (INFO / DUMP)                                          */
+/* 2. プロトコル (INFO / GET / SET / DUMP)                                */
 /* ------------------------------------------------------------------ */
 
 class ProtocolError extends Error {
@@ -298,12 +299,22 @@ const els = {
   info: document.getElementById("info"),
   keymapPanel: document.getElementById("keymap-panel"),
   keymap: document.getElementById("keymap"),
+  editPanel: document.getElementById("edit-panel"),
+  editTarget: document.getElementById("edit-target"),
+  kcSearch: document.getElementById("kc-search"),
+  kcList: document.getElementById("kc-list"),
+  kcHex: document.getElementById("kc-hex"),
+  kcPreview: document.getElementById("kc-preview"),
+  btnSet: document.getElementById("btn-set"),
+  editMsg: document.getElementById("edit-msg"),
   log: document.getElementById("log"),
 };
 
 let transport = null; // 接続中の SerialLineTransport
 let busy = false; // 読み込み中は次の操作を受け付けない
 let currentPort = null;
+// 画面に出しているキーマップ。{ info, codes[layer][index], caps[layer][index](マスの部品), selected: {layer, index} | null }
+let model = null;
 
 function setStatus(kind, text) {
   els.status.className = "status status-" + kind;
@@ -336,13 +347,29 @@ function updateButtons() {
   els.connect.disabled = connected || busy;
   els.reload.disabled = !connected || busy || broken;
   els.disconnect.disabled = !connected;
+  updateEditControls();
+}
+
+// 編集欄は、キーマップを表示していて、通信中でも応答なしでもないときだけ使える
+function updateEditControls() {
+  const usable = transport !== null && !busy && model !== null && transport.syncState !== "broken";
+  els.kcSearch.disabled = !usable;
+  els.kcList.disabled = !usable;
+  els.kcHex.disabled = !usable;
+  els.btnSet.disabled = !(usable && model.selected !== null);
 }
 
 function clearResults() {
   els.infoPanel.hidden = true;
   els.keymapPanel.hidden = true;
+  els.editPanel.hidden = true;
   els.info.replaceChildren();
   els.keymap.replaceChildren();
+  model = null;
+  els.editTarget.textContent = "(なし)";
+  els.kcHex.value = "";
+  updatePreview();
+  clearEditMessage();
 }
 
 // コマンドを1つ送り、応答が返るまで待つ(リクエスト/レスポンス方式)。
@@ -405,6 +432,32 @@ function renderInfo(info, rawInfo) {
   els.infoPanel.hidden = false;
 }
 
+// マスの下に添える注釈(名前など)
+function capNote(code) {
+  if (code === 0x0000) return "何もしない";
+  if (code === 0x0001) return "透過";
+  const k = findKeycode(code);
+  return k ? k.name : "(一覧にない値)";
+}
+
+// マス1つの中身(index・keycode・注釈)を作り直す。最初の表示と、SET のあとの更新の両方で使う
+function fillCap(cap, layerIndex, index, code) {
+  cap.replaceChildren();
+  cap.classList.toggle("none", code === 0x0000);
+  cap.classList.toggle("trans", code === 0x0001);
+  const idx = document.createElement("span");
+  idx.className = "idx";
+  idx.textContent = String(index);
+  const c = document.createElement("span");
+  c.className = "code";
+  c.textContent = hex4(code);
+  const note = document.createElement("span");
+  note.className = "note";
+  note.textContent = capNote(code);
+  cap.append(idx, c, note);
+  cap.setAttribute("aria-label", "レイヤー " + layerIndex + " キー " + index + ": " + hex4(code) + " " + capNote(code));
+}
+
 function renderLayer(layerIndex, codes, info) {
   // index = row * cols + col (protocol.md §2)。rows × cols が keys と合わないときは1行に並べる
   const shapeOk = info.rows * info.cols === info.keys;
@@ -420,26 +473,16 @@ function renderLayer(layerIndex, codes, info) {
   grid.className = "grid";
   grid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(78px, 1fr))";
 
+  model.caps[layerIndex] = [];
   codes.forEach((code, index) => {
-    const cap = document.createElement("div");
+    const cap = document.createElement("button");
+    cap.type = "button";
     cap.className = "cap";
-    const idx = document.createElement("span");
-    idx.className = "idx";
-    idx.textContent = String(index);
-    const c = document.createElement("span");
-    c.className = "code";
-    c.textContent = hex4(code);
-    const note = document.createElement("span");
-    note.className = "note";
-    if (code === 0x0000) {
-      cap.classList.add("none");
-      note.textContent = "何もしない";
-    } else if (code === 0x0001) {
-      cap.classList.add("trans");
-      note.textContent = "透過";
-    }
-    cap.append(idx, c, note);
+    cap.setAttribute("aria-pressed", "false");
+    cap.addEventListener("click", () => selectKey(layerIndex, index));
+    fillCap(cap, layerIndex, index, code);
     grid.appendChild(cap);
+    model.caps[layerIndex].push(cap);
   });
 
   section.appendChild(grid);
@@ -468,23 +511,193 @@ async function loadAll() {
       warnings.push("rows × cols (" + info.rows * info.cols + ") が keys (" + info.keys + ") と一致しないため、1行に並べて表示します。");
     }
 
+    model = { info, codes: [], caps: [], selected: null };
     els.keymapPanel.hidden = false;
     for (let layer = 0; layer < info.layers; layer++) {
       const resp = await request("DUMP " + layer);
       const codes = parseDumpData(resp.data, info.keys);
+      model.codes[layer] = codes;
       renderLayer(layer, codes, info);
     }
+    els.editPanel.hidden = false;
 
     setStatus("on", "接続中 (" + info.name + ")");
     if (warnings.length > 0) showError(warnings.join("\n"), true);
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
+    model = null; // 途中までしか読めていないキーマップは、編集させない
+    els.editPanel.hidden = true;
     setStatus("err", e instanceof SyncBrokenError ? "応答なし" : "読み込み失敗");
     showError(describeError(e));
   } finally {
     busy = false;
     updateButtons();
   }
+}
+
+/* ---- キーの編集 ---- */
+
+function showEditMessage(kind, text) {
+  els.editMsg.className = "edit-msg " + kind; // kind: ok / fail / info
+  els.editMsg.textContent = text;
+  els.editMsg.hidden = false;
+}
+
+function clearEditMessage() {
+  els.editMsg.hidden = true;
+  els.editMsg.textContent = "";
+}
+
+// keycode の一覧を作る(絞り込み文字に合うものだけ、グループごとに)
+function populateKeycodeList(filterText) {
+  const keep = els.kcList.value;
+  els.kcList.replaceChildren();
+  const hits = searchKeycodes(filterText);
+  for (const g of KEYCODE_GROUPS) {
+    const items = hits.filter((k) => k.group === g.id);
+    if (items.length === 0) continue;
+    const og = document.createElement("optgroup");
+    og.label = g.title;
+    for (const k of items) {
+      const o = document.createElement("option");
+      o.value = String(k.code);
+      o.textContent = keycodeHex(k.code) + "  " + k.name + "  " + k.label;
+      og.appendChild(o);
+    }
+    els.kcList.appendChild(og);
+  }
+  if (hits.length === 0) {
+    const o = document.createElement("option");
+    o.disabled = true;
+    o.textContent = "(当てはまるものがありません)";
+    els.kcList.appendChild(o);
+  }
+  if (keep !== "") els.kcList.value = keep; // 絞り込み後にも残っていれば、選択を保つ
+}
+
+// 入力欄の内容を読み取って、下に「→ 0x0004 KC_A(A)」のように見せる
+function updatePreview() {
+  const text = els.kcHex.value;
+  els.kcPreview.className = "kc-preview";
+  if (text.trim() === "") {
+    els.kcPreview.textContent = "";
+    return;
+  }
+  const p = parseKeycodeText(text);
+  if (!p.ok) {
+    els.kcPreview.textContent = p.reason;
+    els.kcPreview.classList.add("bad");
+    return;
+  }
+  const k = findKeycode(p.code);
+  els.kcPreview.textContent = "→ " + keycodeHex(p.code) + (k
+    ? "  " + k.name + "(" + k.label + ")"
+    : "  一覧にない値です。デバイスが対応していなければ、エラーになります");
+  if (k) els.kcList.value = String(p.code);
+  else els.kcList.selectedIndex = -1;
+}
+
+// マスをクリックして選ぶ
+function selectKey(layer, index) {
+  if (!model || busy || transport === null) return;
+  model.selected = { layer, index };
+  model.caps.forEach((row, l) => row.forEach((cap, i) => {
+    const on = l === layer && i === index;
+    cap.classList.toggle("selected", on);
+    cap.classList.remove("set-failed");
+    cap.setAttribute("aria-pressed", on ? "true" : "false");
+  }));
+  els.editTarget.textContent = "レイヤー " + layer + " / キー " + index;
+  els.kcHex.value = hex4(model.codes[layer][index]);
+  updatePreview();
+  clearEditMessage();
+  updateEditControls();
+}
+
+// 1キーの現在の値を、デバイスから読み直す
+async function readKey(layer, index) {
+  const resp = await request("GET " + layer + " " + index);
+  return parseDumpData(resp.data, 1)[0];
+}
+
+function keyLabel(code) {
+  const k = findKeycode(code);
+  return keycodeHex(code) + (k ? "(" + k.name + ")" : "");
+}
+
+// 選んだマスに、入力欄の keycode を SET で送る(RAMだけ。Flash は変わらない)
+async function applyEdit() {
+  if (!model || !model.selected || busy || transport === null) return;
+  const { layer, index } = model.selected;
+  const where = "レイヤー " + layer + " / キー " + index;
+  const cap = model.caps[layer][index];
+
+  const parsed = parseKeycodeText(els.kcHex.value);
+  if (!parsed.ok) {
+    showEditMessage("fail", parsed.reason);
+    return;
+  }
+  const code = parsed.code;
+  if (code === model.codes[layer][index]) {
+    showEditMessage("info", where + " は、すでに " + keyLabel(code) + " です(何も送っていません)。");
+    return;
+  }
+
+  busy = true;
+  updateButtons();
+  clearEditMessage();
+  cap.classList.remove("set-failed");
+  try {
+    await request("SET " + layer + " " + index + " " + hex4(code));
+    model.codes[layer][index] = code;
+    fillCap(cap, layer, index, code);
+    showEditMessage("ok", where + " を " + keyLabel(code) + " に変更しました。まだ保存していないので、USBを抜き差しすると元に戻ります。");
+  } catch (e) {
+    if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
+    await handleSetError(e, layer, index, code, cap);
+  } finally {
+    busy = false;
+    updateButtons();
+  }
+}
+
+async function handleSetError(e, layer, index, code, cap) {
+  const where = "レイヤー " + layer + " / キー " + index;
+  if (e instanceof ProtocolError && e.code !== "BADRESP") {
+    cap.classList.add("set-failed");
+    const detail = "ERR " + e.code + (e.message ? " " + e.message : "");
+    if (e.code === "BADARG") {
+      showEditMessage("fail", where + " は変更できませんでした。デバイスが " + keycodeHex(code) + " に対応していません(" + detail + ")。キーマップは変わっていません。");
+    } else if (e.code === "RANGE") {
+      showEditMessage("fail", where + " は変更できませんでした。デバイスが、レイヤーまたはキー番号を範囲外だと言っています(" + detail + ")。ツールとデバイスの設定が食い違っているので、「再読み込み」で読み直してください。");
+    } else {
+      showEditMessage("fail", where + " は変更できませんでした。デバイスがエラーを返しました(" + detail + ")。");
+    }
+    return;
+  }
+  if (e instanceof TimeoutError) {
+    // 変更が届いたかどうか分からない。遅れた応答が届くのを待ってから、そのキーだけ読み直す
+    showEditMessage("info", where + ": 応答が時間内に来ませんでした。変更されたか分からないので、遅れた応答を待って、値を読み直します…");
+    try {
+      const actual = await readKey(layer, index);
+      if (transport === null) return;
+      model.codes[layer][index] = actual;
+      fillCap(cap, layer, index, actual);
+      if (actual === code) {
+        showEditMessage("ok", where + ": 応答は遅れましたが、" + keyLabel(actual) + " に変更されていました。まだ保存していないので、USBを抜き差しすると元に戻ります。");
+      } else {
+        cap.classList.add("set-failed");
+        showEditMessage("fail", where + ": 変更は反映されていませんでした。今の値は " + keyLabel(actual) + " です。");
+      }
+    } catch (e2) {
+      if (transport === null) return;
+      cap.classList.add("set-failed");
+      showEditMessage("fail", where + ": 値を読み直せませんでした。" + describeError(e2));
+    }
+    return;
+  }
+  cap.classList.add("set-failed");
+  showEditMessage("fail", where + ": " + describeError(e));
 }
 
 function describeError(e) {
@@ -594,6 +807,22 @@ function init() {
   els.connect.addEventListener("click", connect);
   els.reload.addEventListener("click", loadAll);
   els.disconnect.addEventListener("click", disconnect);
+  // 編集欄
+  populateKeycodeList("");
+  els.kcSearch.addEventListener("input", () => populateKeycodeList(els.kcSearch.value));
+  els.kcList.addEventListener("change", () => {
+    if (els.kcList.value === "") return;
+    els.kcHex.value = keycodeHex(Number(els.kcList.value));
+    updatePreview();
+  });
+  els.kcHex.addEventListener("input", updatePreview);
+  els.kcHex.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      applyEdit();
+    }
+  });
+  els.btnSet.addEventListener("click", applyEdit);
   // ケーブルを抜いたとき。読み取りループ側でも検知するが、念のため両方で受ける
   navigator.serial.addEventListener("disconnect", (event) => {
     if (transport && event.target === currentPort) {
