@@ -104,6 +104,7 @@ button:focus-visible { outline: 3px solid #7fb8c2; outline-offset: 2px; }
 }
 
 .cap {
+  position: relative;
   min-width: 78px;
   padding: 6px 8px 10px;
   background: var(--cap);
@@ -123,6 +124,15 @@ button:focus-visible { outline: 3px solid #7fb8c2; outline-offset: 2px; }
 /* 表(.grid)の横スクロール設定で外側が切れるので、枠は内側に描く */
 .cap.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
 .cap.set-failed { background: var(--err-bg); border-color: var(--err-ink); }
+
+/* 未保存の変更(● と、保存ボタンの強調) */
+.cap.changed { border-color: #d9822b; }
+.cap.changed::after { content: "●"; position: absolute; top: 4px; right: 8px; font-size: 0.7rem; color: #d9822b; }
+.save-bar { margin-bottom: 12px; }
+.dirty-badge { font-weight: 600; }
+.dirty-badge.dirty { color: #9a5a12; }
+.dirty-badge.clean { color: var(--muted); font-weight: 400; }
+#btn-save.dirty:not(:disabled) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
 /* キーの編集 */
 .edit-target { margin: 0 0 12px; }
@@ -151,7 +161,7 @@ button:focus-visible { outline: 3px solid #7fb8c2; outline-offset: 2px; }
 .kc-preview.bad { color: var(--err-ink); }
 #btn-set { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 #btn-set:disabled { background: #c3d3d6; border-color: #c3d3d6; color: #fff; }
-.edit-msg { margin-top: 12px; padding: 10px 12px; border-radius: 6px; }
+.edit-msg { margin-top: 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
 .edit-msg[hidden] { display: none; }
 .edit-msg.ok { background: #e8f5ee; color: #14532d; }
 .edit-msg.fail { background: var(--err-bg); color: var(--err-ink); }

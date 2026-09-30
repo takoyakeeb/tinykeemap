@@ -10,7 +10,7 @@
 <body>
   <header class="top">
     <h1>tinykeemap</h1>
-    <p class="lead">キーボードにUSBで接続して、キーマップを読み取り、1キーずつ変更します(保存機能は次の版で追加します)。</p>
+    <p class="lead">キーボードにUSBで接続して、キーマップを読み取り、変更して、保存します。</p>
   </header>
 
   <main>
@@ -32,13 +32,21 @@
 
     <section class="panel" id="keymap-panel" aria-labelledby="keymap-title" hidden>
       <h2 id="keymap-title">キーマップ</h2>
-      <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。マスをクリックすると、下の「キーの編集」で変更できます。</p>
+      <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。マスをクリックすると、下の「キーの編集」で変更できます。
+        ● が付いたマスは、まだ保存していない変更です(接続したとき、または最後に保存・読み直しをしたときの内容との違い)。</p>
+      <div class="row save-bar">
+        <button id="btn-save" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する(SAVE)</button>
+        <button id="btn-load" type="button" disabled title="Flash に保存した内容を読み直します。未保存の変更は破棄されます">読み直す(LOAD)</button>
+        <button id="btn-reset" type="button" disabled title="初期キーマップに戻します。保存するまで Flash は変わりません">初期化(RESET)</button>
+        <span id="dirty-badge" class="dirty-badge" role="status"></span>
+      </div>
+      <div id="save-msg" class="edit-msg" role="status" hidden></div>
       <div id="keymap"></div>
     </section>
 
     <section class="panel" id="edit-panel" aria-labelledby="edit-title" hidden>
       <h2 id="edit-title">キーの編集</h2>
-      <p class="hint">上のマスを選び、割り当てる keycode を選んで「変更する」を押します。変更はすぐにキーボードの入力へ反映されます。まだ保存していないので、USBを抜き差しすると保存済みの内容に戻ります。</p>
+      <p class="hint">上のマスを選び、割り当てる keycode を選んで「変更する」を押します。変更はすぐにキーボードの入力へ反映されますが、「保存する」を押すまでは保存されません(USBを抜き差しすると、保存済みの内容に戻ります)。</p>
       <p class="edit-target">選択中: <strong id="edit-target">(なし)</strong></p>
       <div class="edit-grid">
         <div class="edit-pick">

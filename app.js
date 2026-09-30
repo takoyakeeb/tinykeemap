@@ -1,10 +1,10 @@
-// tinykeemap (キーマップの表示と、1キーずつの変更)
+// tinykeemap (キーマップの表示・変更・保存)
 // 仕様: docs/protocol.md (Draft v1, proto=1)
 // keycode の名前の表・入力の解釈は keycodes.js(先に読み込む)
 //
 // 構成(上から順に、下の層は上の層を知らない):
 //   1. SerialLineTransport … WebSerial で「1行送る / 1行受け取る」だけ(USBの都合はここに閉じ込める)
-//   2. protocol … 1行の文字列 ⇔ INFO / DUMP / SET の結果 の変換
+//   2. protocol … 1行の文字列 ⇔ コマンドの結果 の変換
 //   3. 画面 … ボタン・表・編集欄・ログの表示
 
 "use strict";
@@ -200,7 +200,7 @@ class SerialLineTransport {
 }
 
 /* ------------------------------------------------------------------ */
-/* 2. プロトコル (INFO / GET / SET / DUMP)                                */
+/* 2. プロトコル                                                        */
 /* ------------------------------------------------------------------ */
 
 class ProtocolError extends Error {
@@ -307,6 +307,11 @@ const els = {
   kcPreview: document.getElementById("kc-preview"),
   btnSet: document.getElementById("btn-set"),
   editMsg: document.getElementById("edit-msg"),
+  btnSave: document.getElementById("btn-save"),
+  btnLoad: document.getElementById("btn-load"),
+  btnReset: document.getElementById("btn-reset"),
+  dirtyBadge: document.getElementById("dirty-badge"),
+  saveMsg: document.getElementById("save-msg"),
   log: document.getElementById("log"),
 };
 
@@ -315,6 +320,12 @@ let busy = false; // 読み込み中は次の操作を受け付けない
 let currentPort = null;
 // 画面に出しているキーマップ。{ info, codes[layer][index], caps[layer][index](マスの部品), selected: {layer, index} | null }
 let model = null;
+// 「保存済み(Flash と同じ)」とみなしている keycode の写し[layer][index]。
+// ツールは Flash の中身を読めないので、接続したときの内容、または最後に保存・読み直したときの内容とする。
+// これと画面の内容との違いが「未保存の変更」。再読み込みでは変えない。接続し直すと作り直す
+let baseline = null;
+// SAVE / LOAD / RESET がタイムアウトしたあと、遅れて届いた応答の行を受け取る入れ物
+let lateCapture = null;
 
 function setStatus(kind, text) {
   els.status.className = "status status-" + kind;
@@ -348,11 +359,23 @@ function updateButtons() {
   els.reload.disabled = !connected || busy || broken;
   els.disconnect.disabled = !connected;
   updateEditControls();
+  updateSaveControls();
 }
 
-// 編集欄は、キーマップを表示していて、通信中でも応答なしでもないときだけ使える
+// 編集・保存の操作は、キーマップを表示していて、通信中でも応答なしでもないときだけできる
+function canOperate() {
+  return transport !== null && !busy && model !== null && transport.syncState !== "broken";
+}
+
+function updateSaveControls() {
+  const usable = canOperate();
+  els.btnSave.disabled = !usable;
+  els.btnLoad.disabled = !usable;
+  els.btnReset.disabled = !usable;
+}
+
 function updateEditControls() {
-  const usable = transport !== null && !busy && model !== null && transport.syncState !== "broken";
+  const usable = canOperate();
   els.kcSearch.disabled = !usable;
   els.kcList.disabled = !usable;
   els.kcHex.disabled = !usable;
@@ -370,6 +393,8 @@ function clearResults() {
   els.kcHex.value = "";
   updatePreview();
   clearEditMessage();
+  clearSaveMessage();
+  refreshDirtyMarks();
 }
 
 // コマンドを1つ送り、応答が返るまで待つ(リクエスト/レスポンス方式)。
@@ -455,7 +480,8 @@ function fillCap(cap, layerIndex, index, code) {
   note.className = "note";
   note.textContent = capNote(code);
   cap.append(idx, c, note);
-  cap.setAttribute("aria-label", "レイヤー " + layerIndex + " キー " + index + ": " + hex4(code) + " " + capNote(code));
+  cap.dataset.label = "レイヤー " + layerIndex + " キー " + index + ": " + hex4(code) + " " + capNote(code);
+  cap.setAttribute("aria-label", cap.dataset.label);
 }
 
 function renderLayer(layerIndex, codes, info) {
@@ -519,6 +545,9 @@ async function loadAll() {
       model.codes[layer] = codes;
       renderLayer(layer, codes, info);
     }
+    // 最初の読み込みでは、今の内容を「保存済み」とみなす。再読み込みでは、前の基準を保つ
+    if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
+    refreshDirtyMarks();
     els.editPanel.hidden = false;
 
     setStatus("on", "接続中 (" + info.name + ")");
@@ -646,12 +675,14 @@ async function applyEdit() {
   busy = true;
   updateButtons();
   clearEditMessage();
+  clearSaveMessage();
   cap.classList.remove("set-failed");
   try {
     await request("SET " + layer + " " + index + " " + hex4(code));
     model.codes[layer][index] = code;
     fillCap(cap, layer, index, code);
-    showEditMessage("ok", where + " を " + keyLabel(code) + " に変更しました。まだ保存していないので、USBを抜き差しすると元に戻ります。");
+    refreshDirtyMarks();
+    showEditMessage("ok", where + " を " + keyLabel(code) + " に変更しました。まだ保存していません(「保存する」を押すまで、USBを抜き差しすると元に戻ります)。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
     await handleSetError(e, layer, index, code, cap);
@@ -683,8 +714,9 @@ async function handleSetError(e, layer, index, code, cap) {
       if (transport === null) return;
       model.codes[layer][index] = actual;
       fillCap(cap, layer, index, actual);
+      refreshDirtyMarks();
       if (actual === code) {
-        showEditMessage("ok", where + ": 応答は遅れましたが、" + keyLabel(actual) + " に変更されていました。まだ保存していないので、USBを抜き差しすると元に戻ります。");
+        showEditMessage("ok", where + ": 応答は遅れましたが、" + keyLabel(actual) + " に変更されていました。まだ保存していません(「保存する」を押すまで、USBを抜き差しすると元に戻ります)。");
       } else {
         cap.classList.add("set-failed");
         showEditMessage("fail", where + ": 変更は反映されていませんでした。今の値は " + keyLabel(actual) + " です。");
@@ -698,6 +730,208 @@ async function handleSetError(e, layer, index, code, cap) {
   }
   cap.classList.add("set-failed");
   showEditMessage("fail", where + ": " + describeError(e));
+}
+
+/* ---- 保存・読み直し・初期化(未保存の変更の管理) ---- */
+
+function copyCodes(codes) {
+  return codes.map((row) => row.slice());
+}
+
+// 基準(baseline)が、今のキーマップと同じ形(レイヤー数・キー数)なら true
+function baselineFits(codes) {
+  return baseline !== null && baseline.length === codes.length &&
+    baseline.every((row, l) => row.length === codes[l].length);
+}
+
+// 保存済みとみなしている内容と違うキーの数
+function changedCount() {
+  if (!model || !baselineFits(model.codes)) return 0;
+  let n = 0;
+  model.codes.forEach((row, l) => row.forEach((code, i) => {
+    if (code !== baseline[l][i]) n++;
+  }));
+  return n;
+}
+
+// 変更したマスの印(●)と、「未保存の変更: N キー」の表示を更新する
+function refreshDirtyMarks() {
+  if (!model || !baselineFits(model.codes)) {
+    els.dirtyBadge.textContent = "";
+    els.dirtyBadge.className = "dirty-badge";
+    els.btnSave.classList.remove("dirty");
+    return;
+  }
+  const n = changedCount();
+  model.caps.forEach((row, l) => row.forEach((cap, i) => {
+    const changed = model.codes[l][i] !== baseline[l][i];
+    cap.classList.toggle("changed", changed);
+    cap.setAttribute("aria-label", (cap.dataset.label || "") + (changed ? "(未保存の変更)" : ""));
+  }));
+  els.dirtyBadge.textContent = n > 0 ? "未保存の変更: " + n + " キー" : "変更なし(保存済みと同じ)";
+  els.dirtyBadge.className = "dirty-badge " + (n > 0 ? "dirty" : "clean");
+  els.btnSave.classList.toggle("dirty", n > 0);
+}
+
+function showSaveMessage(kind, text) {
+  els.saveMsg.className = "edit-msg " + kind; // kind: ok / fail / info
+  els.saveMsg.textContent = text;
+  els.saveMsg.hidden = false;
+}
+
+function clearSaveMessage() {
+  els.saveMsg.hidden = true;
+  els.saveMsg.textContent = "";
+}
+
+// 全レイヤーを DUMP で読み直す(LOAD / RESET のあと、画面を合わせるために使う)
+async function readAllCodes() {
+  const codes = [];
+  for (let layer = 0; layer < model.info.layers; layer++) {
+    const resp = await request("DUMP " + layer);
+    codes[layer] = parseDumpData(resp.data, model.info.keys);
+  }
+  return codes;
+}
+
+// 読み直した内容を画面に反映する
+function applyCodes(codes) {
+  model.codes = codes;
+  codes.forEach((row, l) => row.forEach((code, i) => {
+    fillCap(model.caps[l][i], l, i, code);
+    model.caps[l][i].classList.remove("set-failed");
+  }));
+  if (model.selected) {
+    els.kcHex.value = hex4(codes[model.selected.layer][model.selected.index]);
+    updatePreview();
+  }
+  refreshDirtyMarks();
+}
+
+// タイムアウトのあと、遅れて届いた応答の行を待って返す(待っても来なければ SyncBrokenError)
+async function waitLateResponse(t) {
+  lateCapture = { line: null };
+  try {
+    await t.whenReady();
+    return lateCapture.line;
+  } finally {
+    lateCapture = null;
+  }
+}
+
+// SAVE / LOAD / RESET を送る。タイムアウトしても、遅れて届いた応答を見て結果を判断する。
+// 成功したら { late } を返す(late: 応答が遅れた)。ERR なら ProtocolError、応答が来なければ SyncBrokenError を投げる
+async function sendStateCommand(command) {
+  const t = transport;
+  try {
+    await request(command);
+    return { late: false };
+  } catch (e) {
+    if (!(e instanceof TimeoutError)) throw e;
+    showSaveMessage("info", command + " の応答が時間内に来ませんでした。結果が分からないので、遅れた応答を待っています…");
+    const line = await waitLateResponse(t);
+    if (line === null) throw new ProtocolError("BADRESP", "遅れた応答を読み取れませんでした");
+    parseResponse(line); // ERR ならここで ProtocolError になる
+    return { late: true };
+  }
+}
+
+function showSaveError(cmd, e) {
+  const name = { SAVE: "保存", LOAD: "読み直し", RESET: "初期化" }[cmd];
+  let msg;
+  if (e instanceof ProtocolError && e.code !== "BADRESP") {
+    const detail = "ERR " + e.code + (e.message ? " " + e.message : "");
+    if (e.code === "FLASH" && cmd === "SAVE") {
+      msg = "保存に失敗しました(" + detail + ")。Flash の内容が壊れた可能性があり、次に電源を入れたとき初期キーマップに戻ることがあります。" +
+        "今のキーマップはキーボードの RAM に残っていて、そのまま使えます。原因を確認してから、もう一度「保存する」を試してください(自動では再試行しません)。";
+    } else if (e.code === "FLASH" && cmd === "LOAD") {
+      msg = "読み直せませんでした(" + detail + ")。Flash に有効な保存データがありません。キーボードの内容は変わっていません。";
+    } else if (e.code === "BADCMD") {
+      msg = "このファームは " + cmd + " に対応していません(" + detail + ")。";
+    } else {
+      msg = name + "できませんでした。デバイスがエラーを返しました(" + detail + ")。";
+    }
+  } else if (e instanceof SyncBrokenError) {
+    msg = cmd === "SAVE"
+      ? "保存できたかどうか分かりません。デバイスから応答がありません。「切断する」で接続し直して、キーマップを確認し、必要ならもう一度保存してください。"
+      : name + "の結果が分かりません。デバイスから応答がありません。「切断する」で接続し直してください。";
+  } else {
+    msg = name + "に失敗しました。" + describeError(e) +
+      (cmd === "SAVE" ? "" : "\nキーボードの今の内容は「再読み込み」で確認できます。");
+  }
+  showSaveMessage("fail", msg);
+}
+
+// 今のキーマップを Flash に保存する(1クリックにつき SAVE は1回だけ。自動で繰り返さない)
+async function doSave() {
+  if (!canOperate()) return;
+  if (changedCount() === 0 && !window.confirm(
+    "変更はありません(保存済みと同じ内容のはずです)。\nそれでも Flash に書き込みますか?\n\nFlash は書き換え回数に限りがあるので、必要なときだけ保存してください。")) return;
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  clearEditMessage();
+  try {
+    const r = await sendStateCommand("SAVE");
+    baseline = copyCodes(model.codes);
+    refreshDirtyMarks();
+    showSaveMessage("ok", (r.late ? "応答は遅れましたが、" : "") + "保存しました。電源を入れ直しても、この内容で起動します。");
+  } catch (e) {
+    if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
+    showSaveError("SAVE", e);
+  } finally {
+    busy = false;
+    updateButtons();
+  }
+}
+
+// Flash に保存した内容を読み直す(未保存の変更は破棄される)
+async function doLoad() {
+  if (!canOperate()) return;
+  const n = changedCount();
+  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n読み直すと、これらの変更は破棄されます。続けますか?")) return;
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  clearEditMessage();
+  try {
+    await sendStateCommand("LOAD");
+    const codes = await readAllCodes();
+    applyCodes(codes);
+    baseline = copyCodes(codes);
+    refreshDirtyMarks();
+    showSaveMessage("ok", "保存済みの内容を読み込みました。");
+  } catch (e) {
+    if (transport === null) return;
+    showSaveError("LOAD", e);
+  } finally {
+    busy = false;
+    updateButtons();
+  }
+}
+
+// 初期キーマップに戻す(キーボードの RAM だけ。Flash は「保存する」を押すまで変わらない)
+async function doReset() {
+  if (!canOperate()) return;
+  const n = changedCount();
+  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n初期キーマップに戻すと、これらの変更は破棄されます(Flash は「保存する」を押すまで変わりません)。続けますか?")) return;
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  clearEditMessage();
+  try {
+    await sendStateCommand("RESET");
+    const codes = await readAllCodes();
+    applyCodes(codes);
+    showSaveMessage("ok", "初期キーマップに戻しました。まだ保存していません。" +
+      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す(LOAD)」を押してください。" : ""));
+  } catch (e) {
+    if (transport === null) return;
+    showSaveError("RESET", e);
+  } finally {
+    busy = false;
+    updateButtons();
+  }
 }
 
 function describeError(e) {
@@ -719,6 +953,8 @@ function describeError(e) {
 function onTransportClosed(err) {
   transport = null;
   busy = false;
+  baseline = null;
+  lateCapture = null;
   clearResults();
   if (err) {
     setStatus("err", "切断されました");
@@ -734,6 +970,7 @@ function onTransportClosed(err) {
 // タイムアウトのあと、遅れて応答が届いた。捨てたことをログに残す
 function onTransportLate(line) {
   log("bad", "! 遅れて届いた応答を破棄しました: " + line);
+  if (lateCapture) lateCapture.line = line; // SAVE などの結果の判断に使う
 }
 
 // タイムアウトのあと、待っても応答が届かなかった。接続し直しが必要
@@ -755,6 +992,7 @@ async function connect() {
     return;
   }
 
+  baseline = null; // 新しい接続では、最初に読み込んだ内容を「保存済み」とみなす
   busy = true;
   updateButtons();
   setStatus("busy", "接続中…");
@@ -787,6 +1025,8 @@ async function connect() {
 
 async function disconnect() {
   if (!transport) return;
+  const n = changedCount();
+  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n切断してもキーボードには残りますが、保存はされません。また、このツールでは「未保存」かどうか分からなくなります。切断しますか?")) return;
   await transport.close();
 }
 
@@ -823,6 +1063,17 @@ function init() {
     }
   });
   els.btnSet.addEventListener("click", applyEdit);
+  // 保存・読み直し・初期化
+  els.btnSave.addEventListener("click", doSave);
+  els.btnLoad.addEventListener("click", doLoad);
+  els.btnReset.addEventListener("click", doReset);
+  // 未保存の変更があるまま、ページを閉じたり移動したりしようとしたときの警告
+  window.addEventListener("beforeunload", (ev) => {
+    if (transport !== null && changedCount() > 0) {
+      ev.preventDefault();
+      ev.returnValue = "";
+    }
+  });
   // ケーブルを抜いたとき。読み取りループ側でも検知するが、念のため両方で受ける
   navigator.serial.addEventListener("disconnect", (event) => {
     if (transport && event.target === currentPort) {
