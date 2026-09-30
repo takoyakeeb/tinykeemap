@@ -86,11 +86,15 @@ Col0  Col1  Col2  Col3
 
 例: `ERR RANGE layer 4 out of range`
 
+`ERR` のコードのあとのメッセージは人間向けの参考情報で、文言は保証しない。ホストはコード(`BADCMD` など)だけで判断する。`FLASH` のメッセージの例: `bad magic` / `unsupported version` / `layout mismatch` / `bad crc` / `undefined keycode` / `erase failed` / `write failed` / `verify failed`。
+
 ### 挙動のルール
 
 - `SET` はRAM上のキーマップを書き換え、**即座に**キー入力へ反映される。電源を切ると元に戻る。
 - 確定したいときだけ `SAVE` を送る。これにより Flash の書き換え回数を抑える。
 - `SAVE` は Flash の消去を伴うため、応答まで時間がかかる場合がある。ホストのタイムアウトは 2 秒以上にする。他のコマンドは 1 秒で十分。
+- `SAVE` は消去を伴うため、その間 USB が短時間止まる場合がある。takoyaki8 の実機では、キーを押している間に `SAVE` しても問題は見られなかった。
+- `LOAD` が `ERR FLASH` を返したときは、デバイスの RAM のキーマップを変更しない(未保存の変更もそのまま残る)。
 - 起動時、Flash の内容が有効ならそれを読み込み、無効なら初期キーマップを使う(§4)。
 
 ## 4. Flash 保存形式
@@ -104,7 +108,9 @@ Col0  Col1  Col2  Col3
 | 5 | 1 | レイヤー数 |
 | 6 | 2 | キー数(1レイヤーあたり) |
 | 8 | 2 × layers × keys | keycode 配列(レイヤー順、各レイヤー内は index 順) |
-| 末尾 | 4 | 上記すべて(マジックから keycode 配列まで)の CRC32 |
+| 末尾 | 4 | 上記すべて(マジックから keycode 配列まで)の CRC32(下記) |
+
+CRC32 は標準的な CRC-32(zlib・ISO-HDLC と同じ。Go の `hash/crc32` の `ChecksumIEEE`)。多項式 0x04C11DB7(ビット反転表記で 0xEDB88320)、初期値 0xFFFFFFFF、入出力ともビット反転、最終 XOR 0xFFFFFFFF。対象はマジックから keycode 配列まで。値はリトルエンディアンで末尾に置く。確認用: ASCII 文字列 `123456789` の CRC32 は 0xCBF43926。
 
 起動時に次のどれかに当てはまれば、Flash の内容は無効とみなして初期キーマップを使う:
 
@@ -112,6 +118,9 @@ Col0  Col1  Col2  Col3
 - フォーマットバージョンが未対応
 - レイヤー数またはキー数が、そのファームの値と一致しない
 - CRC32 が一致しない
+- keycode 配列に、ファームが受け付けない値(未定義の keycode)が含まれる
+
+`LOAD` でも同じ条件で無効と判断し、`ERR FLASH` を返す。
 
 書き込み中に電源が切れても CRC が合わなくなるだけなので、キーボードが使えなくなることはない。
 
