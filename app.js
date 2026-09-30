@@ -3,8 +3,8 @@
 //
 // 構成(上から順に、下の層は上の層を知らない):
 //   1. SerialLineTransport … WebSerial で「1行送る / 1行受け取る」だけ(USBの都合はここに閉じ込める)
-//   2. protocol            … 1行の文字列 ⇔ INFO / DUMP の結果 の変換
-//   3. 画面                … ボタン・表・ログの表示
+//   2. protocol … 1行の文字列 ⇔ INFO / DUMP の結果 の変換
+//   3. 画面 … ボタン・表・ログの表示
 
 "use strict";
 
@@ -19,8 +19,19 @@ class TimeoutError extends Error {
   }
 }
 
+// タイムアウトのあと、遅れて届く応答も待ったが、来なかった
+class SyncBrokenError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "SyncBrokenError";
+  }
+}
+
+// タイムアウトしたコマンドの応答が遅れて届くかもしれないので、このぶん待つ(ミリ秒)
+const LATE_GRACE_MS = 5000;
+
 class SerialLineTransport {
-  // callbacks: { onDebug(line), onStray(line), onClosed(errorOrNull) }
+  // callbacks: { onDebug(line), onStray(line), onLate(line), onBroken(), onClosed(errorOrNull) }
   constructor(port, callbacks) {
     this.port = port;
     this.cb = callbacks;
@@ -31,6 +42,13 @@ class SerialLineTransport {
     this.readLoopDone = null;
     this.closing = false;
     this.closedNotified = false;
+    // 応答のずれを防ぐための状態
+    //   "ready"  … 通常。次のコマンドを送ってよい
+    //   "late"   … タイムアウトした。前のコマンドの応答が遅れて届くかもしれないので、次は送らない
+    //   "broken" … 待っても届かなかった。接続し直すまで、コマンドは送れない
+    this.syncState = "ready";
+    this.lateTimer = null;
+    this.readyWaiters = []; // whenReady() で待っている { resolve, reject }
   }
 
   async open() {
@@ -77,6 +95,13 @@ class SerialLineTransport {
       this.cb.onDebug(line);
       return;
     }
+    if (this.syncState === "late") {
+      // タイムアウトした前のコマンドの応答が、遅れて届いた。
+      // 次のコマンドの応答と取り違えないよう、捨てる
+      this._setSyncState("ready");
+      this.cb.onLate(line);
+      return;
+    }
     if (this.waiter) {
       const w = this.waiter;
       this.waiter = null;
@@ -87,9 +112,43 @@ class SerialLineTransport {
     }
   }
 
+  _setSyncState(next) {
+    this.syncState = next;
+    if (next !== "late" && this.lateTimer) {
+      clearTimeout(this.lateTimer);
+      this.lateTimer = null;
+    }
+    if (next === "ready" || next === "broken") {
+      const waiters = this.readyWaiters;
+      this.readyWaiters = [];
+      for (const w of waiters) {
+        if (next === "ready") w.resolve();
+        else w.reject(new SyncBrokenError("デバイスから応答がありません"));
+      }
+    }
+  }
+
+  // タイムアウトした。遅れて届く応答を LATE_GRACE_MS だけ待つ
+  _enterLate() {
+    if (this.closing || this.closedNotified) return;
+    this._setSyncState("late");
+    this.lateTimer = setTimeout(() => {
+      this.lateTimer = null;
+      this._setSyncState("broken");
+      this.cb.onBroken();
+    }, LATE_GRACE_MS);
+  }
+
   _notifyClosed(err) {
     if (this.closedNotified) return;
     this.closedNotified = true;
+    if (this.lateTimer) {
+      clearTimeout(this.lateTimer);
+      this.lateTimer = null;
+    }
+    const waiters = this.readyWaiters;
+    this.readyWaiters = [];
+    for (const w of waiters) w.reject(new Error("接続が切れました"));
     if (this.waiter) {
       const w = this.waiter;
       this.waiter = null;
@@ -103,6 +162,15 @@ class SerialLineTransport {
     await this.writer.write(new TextEncoder().encode(text + "\n"));
   }
 
+  // 次のコマンドを送ってよい状態になるまで待つ(遅れた応答が届くまで。待っても来なければ失敗)
+  whenReady() {
+    if (this.syncState === "ready") return Promise.resolve();
+    if (this.syncState === "broken") return Promise.reject(new SyncBrokenError("デバイスから応答がありません"));
+    return new Promise((resolve, reject) => {
+      this.readyWaiters.push({ resolve, reject });
+    });
+  }
+
   // 次の1行(デバッグ行を除く)を待つ
   readLine(timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -112,6 +180,7 @@ class SerialLineTransport {
       }
       const timer = setTimeout(() => {
         this.waiter = null;
+        this._enterLate(); // 応答が遅れて届くかもしれない。しばらく次のコマンドを送らない
         reject(new TimeoutError("応答が " + timeoutMs + "ms 以内に返りませんでした"));
       }, timeoutMs);
       this.waiter = { resolve, reject, timer };
@@ -142,7 +211,14 @@ class ProtocolError extends Error {
   }
 }
 
-const DEFAULT_TIMEOUT_MS = 1000; // protocol.md §3: 通常1秒(SAVE のみ2秒以上。今回は使わない)
+// protocol.md §3: 通常のコマンドは1秒、SAVE は2秒以上(余裕を見て3秒)
+const DEFAULT_TIMEOUT_MS = 1000;
+const SAVE_TIMEOUT_MS = 3000;
+
+function timeoutFor(command) {
+  const name = command.split(" ")[0];
+  return name === "SAVE" ? SAVE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+}
 
 // 1行の応答を { data } にする。ERR なら ProtocolError を投げる
 function parseResponse(line) {
@@ -256,8 +332,9 @@ function log(kind, text) {
 
 function updateButtons() {
   const connected = transport !== null;
+  const broken = connected && transport.syncState === "broken"; // 応答が途絶えた。接続し直すまで操作できない
   els.connect.disabled = connected || busy;
-  els.reload.disabled = !connected || busy;
+  els.reload.disabled = !connected || busy || broken;
   els.disconnect.disabled = !connected;
 }
 
@@ -268,15 +345,33 @@ function clearResults() {
   els.keymap.replaceChildren();
 }
 
-// コマンドを1つ送り、応答が返るまで待つ(リクエスト/レスポンス方式)
-async function request(command, timeoutMs) {
+// コマンドを1つ送り、応答が返るまで待つ(リクエスト/レスポンス方式)。
+// 呼び出しは待ち行列に入り、必ず1つずつ順番に実行される
+let requestQueueTail = Promise.resolve();
+
+function request(command, timeoutMs) {
+  const result = requestQueueTail.then(() => doRequest(command, timeoutMs));
+  requestQueueTail = result.catch(() => { /* 失敗しても次の呼び出しは実行する */ });
+  return result;
+}
+
+async function doRequest(command, timeoutMs) {
   if (!transport) throw new Error("接続されていません");
   const t = transport;
+
+  // 前のコマンドがタイムアウトしていたら、遅れた応答が届くまで待つ(応答の取り違えを防ぐ)
+  if (t.syncState !== "ready") {
+    setStatus("busy", "遅れた応答を待っています…");
+    log("dbg", "(前のコマンドの遅れた応答を待っています)");
+  }
+  await t.whenReady();
+  if (transport !== t) throw new Error("接続が切れました");
+
   log("tx", "> " + command);
   await t.writeLine(command);
   let line;
   try {
-    line = await t.readLine(timeoutMs || DEFAULT_TIMEOUT_MS);
+    line = await t.readLine(timeoutMs || timeoutFor(command));
   } catch (e) {
     log("bad", "! " + e.message);
     throw e;
@@ -384,7 +479,7 @@ async function loadAll() {
     if (warnings.length > 0) showError(warnings.join("\n"), true);
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
-    setStatus("err", "読み込み失敗");
+    setStatus("err", e instanceof SyncBrokenError ? "応答なし" : "読み込み失敗");
     showError(describeError(e));
   } finally {
     busy = false;
@@ -397,8 +492,13 @@ function describeError(e) {
     if (e.code === "BADRESP") return "応答を読み取れませんでした: " + e.message;
     return "デバイスがエラーを返しました: ERR " + e.code + (e.message ? " " + e.message : "");
   }
+  if (e instanceof SyncBrokenError) {
+    return "デバイスから応答がありません(遅れて届く応答も約 " + LATE_GRACE_MS / 1000 + " 秒待ちましたが、来ませんでした)。\n" +
+      "「切断する」を押して、もう一度接続してください。";
+  }
   if (e instanceof TimeoutError) {
-    return e.message + "\nデバイスのファームが USBシリアルのコマンドに対応しているか、debug 出力が有効になっていないか確認してください。";
+    return e.message + "\n遅れて届く応答を最大約 " + LATE_GRACE_MS / 1000 + " 秒待ちます。そのあとで「再読み込み」を押してください。\n" +
+      "何度も続く場合は、デバイスのファームが USBシリアルのコマンドに対応しているか、debug 出力が有効になっていないか確認してください。";
   }
   return e.message || String(e);
 }
@@ -418,6 +518,19 @@ function onTransportClosed(err) {
   updateButtons();
 }
 
+// タイムアウトのあと、遅れて応答が届いた。捨てたことをログに残す
+function onTransportLate(line) {
+  log("bad", "! 遅れて届いた応答を破棄しました: " + line);
+}
+
+// タイムアウトのあと、待っても応答が届かなかった。接続し直しが必要
+function onTransportBroken() {
+  log("bad", "! 応答が途絶えました。接続し直してください");
+  setStatus("err", "応答なし");
+  showError(describeError(new SyncBrokenError("")));
+  updateButtons();
+}
+
 async function connect() {
   clearError();
   let port;
@@ -432,9 +545,12 @@ async function connect() {
   busy = true;
   updateButtons();
   setStatus("busy", "接続中…");
+
   const t = new SerialLineTransport(port, {
     onDebug: (line) => log("dbg", line),
     onStray: (line) => log("bad", "? 予期しない行: " + line),
+    onLate: onTransportLate,
+    onBroken: onTransportBroken,
     onClosed: onTransportClosed,
   });
   try {
@@ -449,6 +565,7 @@ async function connect() {
     updateButtons();
     return;
   }
+
   transport = t;
   currentPort = port;
   log("dbg", "(接続しました)");
