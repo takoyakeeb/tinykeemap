@@ -531,7 +531,7 @@ async function loadAll() {
     const rawInfo = parseInfoData(rawInfoResp.data);
     const info = normalizeInfo(rawInfo);
     renderInfo(info, rawInfo);
-    // レイヤー切り替え(MO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
+    // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
     populateKeycodeList(els.kcSearch.value);
 
