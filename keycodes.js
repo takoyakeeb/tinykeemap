@@ -4,9 +4,9 @@
 //   デバイスとの通信(docs/protocol.md)では、名前は使わず、16進の値だけを送る。
 //   なので、名前が間違っていても通信は壊れない。
 // ・値と名前は、QMK の基本キーコードに合わせてある(下位8bitは USB HID の Usage ID)。
-// ・takoyaki8 (fw 0.1.0) のファームが受け付けるのは、0x0000 / 0x0001 / 0x0004〜0x00A4。
-//   この表もその範囲に合わせている。ファームが対応を増やしたら、ここにも足す
-//   (修飾キーやレイヤー切り替えは、docs/protocol.md で値を決めてから)。
+// ・この表にあるのは、0x0000 / 0x0001 / 0x0004〜0x00A4 / 0x00E0〜0x00E7(修飾キー単体)。
+//   ファームが対応を増やしたら、ここにも足す
+//   (修飾キー付き・レイヤー切り替えは docs/protocol.md で値を決めてある。ファームの対応が済んでから足す)。
 // ・表にない値でも、16進で入力すればデバイスへ送れる。対応していなければ、デバイスが ERR BADARG を返す。
 
 "use strict";
@@ -17,6 +17,7 @@ const KEYCODE_GROUPS = [
   { id: "letters", title: "英字" },
   { id: "numbers", title: "数字" },
   { id: "basic", title: "基本キー" },
+  { id: "modifier", title: "修飾キー" },
   { id: "symbols", title: "記号" },
   { id: "function", title: "ファンクション" },
   { id: "navigation", title: "移動・編集" },
@@ -191,10 +192,17 @@ const KEYCODE_ROWS = [
   [0x00A2, "KC_CLEAR_AGAIN", "KC_CLAG", "Clear/Again", "other"],
   [0x00A3, "KC_CRSEL", "KC_CRSL", "CrSel", "other"],
   [0x00A4, "KC_EXSEL", "KC_EXSL", "ExSel", "other"],
+  [0x00E0, "KC_LEFT_CTRL", "KC_LCTL", "左 Ctrl", "modifier"],
+  [0x00E1, "KC_LEFT_SHIFT", "KC_LSFT", "左 Shift", "modifier"],
+  [0x00E2, "KC_LEFT_ALT", "KC_LALT", "左 Alt", "modifier"],
+  [0x00E3, "KC_LEFT_GUI", "KC_LGUI", "左 GUI(Windows / Super キー)", "modifier"],
+  [0x00E4, "KC_RIGHT_CTRL", "KC_RCTL", "右 Ctrl", "modifier"],
+  [0x00E5, "KC_RIGHT_SHIFT", "KC_RSFT", "右 Shift", "modifier"],
+  [0x00E6, "KC_RIGHT_ALT", "KC_RALT", "右 Alt", "modifier"],
+  [0x00E7, "KC_RIGHT_GUI", "KC_RGUI", "右 GUI", "modifier"],
 ];
 
 const KEYCODES = KEYCODE_ROWS.map(([code, name, alias, label, group]) => ({ code, name, alias, label, group }));
-
 const KEYCODE_BY_CODE = new Map(KEYCODES.map((k) => [k.code, k]));
 const KEYCODE_BY_NAME = new Map();
 for (const k of KEYCODES) {
