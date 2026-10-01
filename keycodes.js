@@ -7,6 +7,8 @@
 // ・この表にあるのは、0x0000 / 0x0001 / 0x0004〜0x00A4 / 0x00E0〜0x00E7(修飾キー単体)。
 //   ファームが対応を増やしたら、ここにも足す
 //   (修飾キー付き・レイヤー切り替えは docs/protocol.md で値を決めてある。ファームの対応が済んでから足す)。
+// ・レイヤー切り替え(MO(n))は、表には入れていない。値が決まっている(0x5220 + n。docs/protocol.md §2)ので、
+//   デバイスのレイヤー数(INFO の layers)に合わせて、下の「レイヤー切り替えの keycode」の部分で一覧を作る。
 // ・表にない値でも、16進で入力すればデバイスへ送れる。対応していなければ、デバイスが ERR BADARG を返す。
 
 "use strict";
@@ -18,6 +20,7 @@ const KEYCODE_GROUPS = [
   { id: "numbers", title: "数字" },
   { id: "basic", title: "基本キー" },
   { id: "modifier", title: "修飾キー" },
+  { id: "layer", title: "レイヤー切り替え" },
   { id: "symbols", title: "記号" },
   { id: "function", title: "ファンクション" },
   { id: "navigation", title: "移動・編集" },
@@ -210,9 +213,57 @@ for (const k of KEYCODES) {
   if (k.alias) KEYCODE_BY_NAME.set(k.alias.toUpperCase(), k);
 }
 
-// 値から表の項目を探す(なければ null)
+/* ---- レイヤー切り替えの keycode (MO(n)) ---- */
+
+// 値は QMK の現行の値。MO(n) = 0x5220 + n で、下位 5bit がレイヤー番号 n(docs/protocol.md §2)
+const LAYER_KEY_BASE_MO = 0x5220;
+const LAYER_KEY_MASK = 0x001f;
+const LAYER_KEY_MAX = 31; // 5bit で表せる最大のレイヤー番号
+
+// いま接続しているデバイスのレイヤー数(INFO の layers)。未接続のときは 0。
+// 一覧に出す MO(n) の数と、範囲外の警告に使う。デバイスとの通信には影響しない
+let deviceLayers = 0;
+
+function setDeviceLayers(n) {
+  deviceLayers = Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+// 値が MO(n) なら n を返す(違えば -1)
+function momentaryLayerOf(code) {
+  if ((code & ~LAYER_KEY_MASK) !== LAYER_KEY_BASE_MO) return -1;
+  return code & LAYER_KEY_MASK;
+}
+
+// MO(n) の項目を作る。デバイスのレイヤー数より大きい n には、warn(警告の文)が付く
+function makeMomentaryEntry(n) {
+  const outOfRange = deviceLayers > 0 && n >= deviceLayers;
+  return {
+    code: LAYER_KEY_BASE_MO + n,
+    name: "MO(" + n + ")",
+    alias: "",
+    label: "押している間だけレイヤー " + n + " を有効にする",
+    group: "layer",
+    warn: outOfRange
+      ? "このデバイスのレイヤー(0〜" + (deviceLayers - 1) + ")にない番号です。デバイスが拒否すると、エラーになります"
+      : "",
+  };
+}
+
+// 一覧に出すレイヤー切り替えの項目(接続中のデバイスのレイヤー数に合わせる)。
+// レイヤー0は常に有効なので、MO(0) は一覧に出さない(入力すれば送れる)
+function layerKeycodes() {
+  const out = [];
+  for (let n = 1; n < deviceLayers && n <= LAYER_KEY_MAX; n++) out.push(makeMomentaryEntry(n));
+  return out;
+}
+
+// 値から項目を探す(表にも MO(n) にも当てはまらなければ null)
 function findKeycode(code) {
-  return KEYCODE_BY_CODE.get(code) || null;
+  const hit = KEYCODE_BY_CODE.get(code);
+  if (hit) return hit;
+  const n = momentaryLayerOf(code);
+  if (n >= 0) return makeMomentaryEntry(n);
+  return null;
 }
 
 // "0x0004" の形(0x + 大文字16進4桁)
@@ -220,21 +271,28 @@ function keycodeHex(code) {
   return "0x" + code.toString(16).toUpperCase().padStart(4, "0");
 }
 
-// 入力欄の文字を keycode にする。16進(0x1D / 0x001d)か、名前・別名(KC_A / kc_ent)を受け付ける
+// 入力欄の文字を keycode にする。16進(0x1D / 0x001d)か、名前・別名(KC_A / kc_ent)か、MO(n)(MO(1) / mo( 2 ))を受け付ける
 function parseKeycodeText(text) {
   const s = String(text).trim();
   if (s === "") return { ok: false, reason: "keycode を入力してください" };
   if (/^0x[0-9a-f]{1,4}$/i.test(s)) return { ok: true, code: parseInt(s, 16) };
+  const mo = /^MO\(\s*([0-9]{1,2})\s*\)$/i.exec(s);
+  if (mo) {
+    const n = Number(mo[1]);
+    if (n > LAYER_KEY_MAX) return { ok: false, reason: "MO(n) の n は 0〜" + LAYER_KEY_MAX + " で入力してください" };
+    return { ok: true, code: LAYER_KEY_BASE_MO + n };
+  }
   const hit = KEYCODE_BY_NAME.get(s.toUpperCase());
   if (hit) return { ok: true, code: hit.code };
-  return { ok: false, reason: "「" + s + "」は読み取れません。0x0004 のような16進か、KC_A のような名前で入力してください" };
+  return { ok: false, reason: "「" + s + "」は読み取れません。0x0004 のような16進か、KC_A や MO(1) のような名前で入力してください" };
 }
 
 // 一覧の絞り込み。空白で区切った言葉が、すべて(値・名前・別名・表示名のどれかに)含まれる項目を返す
 function searchKeycodes(text) {
   const words = String(text).toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return KEYCODES;
-  return KEYCODES.filter((k) => {
+  const all = KEYCODES.concat(layerKeycodes());
+  if (words.length === 0) return all;
+  return all.filter((k) => {
     const hay = (keycodeHex(k.code) + " " + k.name + " " + k.alias + " " + k.label).toLowerCase();
     return words.every((w) => hay.includes(w));
   });

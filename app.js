@@ -389,6 +389,8 @@ function clearResults() {
   els.info.replaceChildren();
   els.keymap.replaceChildren();
   model = null;
+  setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
+  populateKeycodeList(els.kcSearch.value);
   els.editTarget.textContent = "(なし)";
   els.kcHex.value = "";
   updatePreview();
@@ -462,7 +464,8 @@ function capNote(code) {
   if (code === 0x0000) return "何もしない";
   if (code === 0x0001) return "透過";
   const k = findKeycode(code);
-  return k ? k.name : "(一覧にない値)";
+  if (!k) return "(一覧にない値)";
+  return k.warn ? k.name + "(範囲外)" : k.name;
 }
 
 // マス1つの中身(index・keycode・注釈)を作り直す。最初の表示と、SET のあとの更新の両方で使う
@@ -528,6 +531,9 @@ async function loadAll() {
     const rawInfo = parseInfoData(rawInfoResp.data);
     const info = normalizeInfo(rawInfo);
     renderInfo(info, rawInfo);
+    // レイヤー切り替え(MO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
+    setDeviceLayers(info.layers);
+    populateKeycodeList(els.kcSearch.value);
 
     const warnings = [];
     if (info.proto !== 1) {
@@ -620,7 +626,7 @@ function updatePreview() {
   }
   const k = findKeycode(p.code);
   els.kcPreview.textContent = "→ " + keycodeHex(p.code) + (k
-    ? "  " + k.name + "(" + k.label + ")"
+    ? "  " + k.name + "(" + k.label + ")" + (k.warn ? "  ⚠ " + k.warn : "")
     : "  一覧にない値です。デバイスが対応していなければ、エラーになります");
   if (k) els.kcList.value = String(p.code);
   else els.kcList.selectedIndex = -1;
