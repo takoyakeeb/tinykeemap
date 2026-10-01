@@ -9,6 +9,8 @@
 //   (修飾キー付き・レイヤー切り替えは docs/protocol.md で値を決めてある。ファームの対応が済んでから足す)。
 // ・レイヤー切り替え(MO(n) / TG(n) / TO(n))は、表には入れていない。値が決まっている(docs/protocol.md §2)ので、
 //   デバイスのレイヤー数(INFO の layers)に合わせて、下の「レイヤー切り替えの keycode」の部分で一覧を作る。
+// ・修飾キー付き(Shift+A など)も、表には入れていない。入力欄に LSFT(KC_A) / S(KC_A) / LCTL(LSFT(KC_A)) の形で
+//   書くか、16進(0x0204)で入力する。値は docs/protocol.md §2(下位8bit=基本キー、ビット8〜12=修飾キー)。
 // ・表にない値でも、16進で入力すればデバイスへ送れる。対応していなければ、デバイスが ERR BADARG を返す。
 
 "use strict";
@@ -275,13 +277,80 @@ function layerKeycodes() {
   return out;
 }
 
-// 値から項目を探す(表にも、レイヤー切り替えにも当てはまらなければ null)
+/* ---- 修飾キー付きの keycode (LSFT(KC_A) など) ---- */
+
+// 値は docs/protocol.md §2。下位 8bit が基本キー(0x0004〜0x00A4)で、ビット 8〜11 が Ctrl / Shift / Alt / GUI、
+// ビット 12(0x1000)が「右側」(立っていると、修飾キーはすべて右側。左右は混ぜられない)
+const MOD_RIGHT_BIT = 0x1000;
+const MOD_BITS_MASK = 0x0f00;
+const BASIC_KEY_MIN = 0x0004;
+const BASIC_KEY_MAX = 0x00a4;
+
+// 修飾キーの表。この順(Ctrl, Shift, Alt, GUI)で、名前や表示に並ぶ
+//   names: 入力で使える書き方(QMK と同じ。1つ目が表示に使う左側の名前)、right: 右側用の名前
+const MOD_KINDS = [
+  { bit: 0x0100, label: "Ctrl", left: "LCTL", right: "RCTL", short: "C" },
+  { bit: 0x0200, label: "Shift", left: "LSFT", right: "RSFT", short: "S" },
+  { bit: 0x0400, label: "Alt", left: "LALT", right: "RALT", short: "A" },
+  { bit: 0x0800, label: "GUI", left: "LGUI", right: "RGUI", short: "G" },
+];
+
+// 入力で使える書き方 → { kind, isRight }。LSFT / S は左側、RSFT は右側
+const MOD_WRAPPER_BY_NAME = new Map();
+for (const m of MOD_KINDS) {
+  MOD_WRAPPER_BY_NAME.set(m.left, { kind: m, isRight: false });
+  MOD_WRAPPER_BY_NAME.set(m.short, { kind: m, isRight: false });
+  MOD_WRAPPER_BY_NAME.set(m.right, { kind: m, isRight: true });
+}
+
+// 値が修飾キー付きなら、項目を作る(違う、または未定義の値なら null)
+//   未定義: 下位 8bit が基本キーでない / 修飾キーのビットが1つもない(0x1004 など)
+function describeModified(code) {
+  if (code < 0x0100 || code > 0x1fff) return null;
+  const baseCode = code & 0x00ff;
+  if (baseCode < BASIC_KEY_MIN || baseCode > BASIC_KEY_MAX) return null;
+  const base = KEYCODE_BY_CODE.get(baseCode);
+  if (!base) return null;
+  const isRight = (code & MOD_RIGHT_BIT) !== 0;
+  const mods = MOD_KINDS.filter((m) => (code & m.bit) !== 0);
+  if (mods.length === 0) return null;
+  // LCTL(LSFT(KC_A)) の形。外側が Ctrl、内側が Shift… の順
+  let name = base.name;
+  for (let i = mods.length - 1; i >= 0; i--) name = (isRight ? mods[i].right : mods[i].left) + "(" + name + ")";
+  // 「Ctrl+Shift+A」の形(右側は「右Ctrl+右Shift+A」)
+  const text = mods.map((m) => (isRight ? "右" : "") + m.label).concat([base.label]).join("+");
+  return { code, name, alias: "", label: text, cap: text, group: "modified", warn: "" };
+}
+
+// LSFT(KC_A) のような書き方の中身を読んで、修飾キーを付けた keycode にする(parseKeycodeText から呼ぶ)
+//   中身は、基本キー(名前・16進)でも、修飾キー付き(LCTL(LSFT(KC_A)) の入れ子)でもよい
+function applyModifier(wrapper, innerText) {
+  const inner = parseKeycodeText(innerText);
+  if (!inner.ok) return inner;
+  let baseCode = inner.code;
+  let mods = 0;
+  let isRight = wrapper.isRight;
+  if (inner.code >= 0x0100 && inner.code <= 0x1fff) {
+    // すでに修飾キーが付いている(入れ子)
+    baseCode = inner.code & 0x00ff;
+    mods = inner.code & MOD_BITS_MASK;
+    if (mods !== 0 && ((inner.code & MOD_RIGHT_BIT) !== 0) !== wrapper.isRight) {
+      return { ok: false, reason: "左右の修飾キーは、1つの keycode に混ぜられません" };
+    }
+  }
+  if (baseCode < BASIC_KEY_MIN || baseCode > BASIC_KEY_MAX) {
+    return { ok: false, reason: "修飾キーを付けられるのは、基本キー(0x0004〜0x00A4)だけです" };
+  }
+  return { ok: true, code: baseCode | mods | wrapper.kind.bit | (isRight ? MOD_RIGHT_BIT : 0) };
+}
+
+// 値から項目を探す(表にも、レイヤー切り替えにも、修飾キー付きにも当てはまらなければ null)
 function findKeycode(code) {
   const hit = KEYCODE_BY_CODE.get(code);
   if (hit) return hit;
   const lk = decodeLayerKey(code);
   if (lk) return makeLayerEntry(lk.kind, lk.n);
-  return null;
+  return describeModified(code);
 }
 
 // "0x0004" の形(0x + 大文字16進4桁)
@@ -289,7 +358,8 @@ function keycodeHex(code) {
   return "0x" + code.toString(16).toUpperCase().padStart(4, "0");
 }
 
-// 入力欄の文字を keycode にする。16進(0x1D / 0x001d)か、名前・別名(KC_A / kc_ent)か、MO(n) / TG(n) / TO(n)(MO(1) / tg( 2 ))を受け付ける
+// 入力欄の文字を keycode にする。16進(0x1D / 0x001d)か、名前・別名(KC_A / kc_ent)か、MO(n) / TG(n) / TO(n)(MO(1) / tg( 2 ))か、
+// 修飾キー付き(LSFT(KC_A) / S(KC_A) / LCTL(LSFT(KC_A)) など)を受け付ける
 function parseKeycodeText(text) {
   const s = String(text).trim();
   if (s === "") return { ok: false, reason: "keycode を入力してください" };
@@ -301,9 +371,14 @@ function parseKeycodeText(text) {
     if (n > LAYER_KEY_MAX) return { ok: false, reason: kind.name + "(n) の n は 0〜" + LAYER_KEY_MAX + " で入力してください" };
     return { ok: true, code: kind.base + n };
   }
+  const wm = /^([A-Za-z]+)\((.*)\)$/.exec(s);
+  if (wm) {
+    const wrapper = MOD_WRAPPER_BY_NAME.get(wm[1].toUpperCase());
+    if (wrapper) return applyModifier(wrapper, wm[2]);
+  }
   const hit = KEYCODE_BY_NAME.get(s.toUpperCase());
   if (hit) return { ok: true, code: hit.code };
-  return { ok: false, reason: "「" + s + "」は読み取れません。0x0004 のような16進か、KC_A や MO(1) のような名前で入力してください" };
+  return { ok: false, reason: "「" + s + "」は読み取れません。0x0004 のような16進か、KC_A や MO(1) や LSFT(KC_A) のような名前で入力してください" };
 }
 
 // 一覧の絞り込み。空白で区切った言葉が、すべて(値・名前・別名・表示名のどれかに)含まれる項目を返す

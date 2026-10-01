@@ -465,6 +465,7 @@ function capNote(code) {
   if (code === 0x0001) return "透過";
   const k = findKeycode(code);
   if (!k) return "(一覧にない値)";
+  if (k.cap) return k.cap; // 修飾キー付きは「Shift+A」のように短く
   return k.warn ? k.name + "(範囲外)" : k.name;
 }
 
