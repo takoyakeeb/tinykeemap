@@ -5,8 +5,9 @@
 //   なので、名前が間違っていても通信は壊れない。
 // ・値と名前は、QMK の基本キーコードに合わせてある(下位8bitは USB HID の Usage ID)。
 // ・この表にあるのは、0x0000 / 0x0001 / 0x0004〜0x00A4 / 0x00E0〜0x00E7(修飾キー単体)。
-//   ファームが対応を増やしたら、ここにも足す
-//   (修飾キー付き・レイヤー切り替えは docs/protocol.md で値を決めてある。ファームの対応が済んでから足す)。
+//   修飾キー付き(LSFT(KC_A) など)とレイヤー切り替え(MO・TG・TO)は、ツールもファームも対応済み。
+//   どちらも表には入れず、下のコードで扱う(次の2項目)。
+//   docs/protocol.md で未定義の種類(DF / TT / LT など)は、仕様に値を決めて、ファームが対応してから足す。
 // ・レイヤー切り替え(MO(n) / TG(n) / TO(n))は、表には入れていない。値が決まっている(docs/protocol.md §2)ので、
 //   デバイスのレイヤー数(INFO の layers)に合わせて、下の「レイヤー切り替えの keycode」の部分で一覧を作る。
 // ・修飾キー付き(Shift+A など)も、表には入れていない。入力欄に LSFT(KC_A) / S(KC_A) / LCTL(LSFT(KC_A)) の形で
@@ -287,7 +288,8 @@ const BASIC_KEY_MIN = 0x0004;
 const BASIC_KEY_MAX = 0x00a4;
 
 // 修飾キーの表。この順(Ctrl, Shift, Alt, GUI)で、名前や表示に並ぶ
-//   names: 入力で使える書き方(QMK と同じ。1つ目が表示に使う左側の名前)、right: 右側用の名前
+//   bit: その修飾キーのビット、label: 画面に出す名前、left / right: 入力と表示に使う名前(QMK と同じ)、
+//   short: 入力だけで使える短い書き方(S(KC_A) の S など。左側として扱う)
 const MOD_KINDS = [
   { bit: 0x0100, label: "Ctrl", left: "LCTL", right: "RCTL", short: "C" },
   { bit: 0x0200, label: "Shift", left: "LSFT", right: "RSFT", short: "S" },
