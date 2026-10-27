@@ -482,55 +482,140 @@ function capNote(code) {
   return k.label;
 }
 
-// マス1つの中身(index・keycode・注釈)を作り直す。最初の表示と、SET のあとの更新の両方で使う
+// ---- キーの絵(マスの大きさと並べ方) ----
+
+// 1u(キー1つぶん)の大きさ。機種の幅と画面の幅から、40〜80px の間で決める
+const UNIT_MIN = 40;
+const UNIT_MAX = 80;
+// いまの大きさと、それに合わせた表示の形(小さいときは、番号を隠し、1行にまとめる)
+const stage = { u: 0, pad: 2, two: true, showIdx: true, mainSize: 17 };
+
+function setStageMetrics(u) {
+  stage.u = u;
+  stage.pad = Math.max(2, Math.round(u * 0.045));
+  stage.two = u >= 56; // 2段(上に小さく修飾キー、下に大きくキー名)
+  stage.showIdx = u >= 64; // 左上の index
+  stage.mainSize = u >= 64 ? 17 : (u >= 50 ? 14 : 12);
+}
+
+function computeUnit() {
+  const w = els.keymap.clientWidth;
+  const lw = model && model.layout ? model.layout.width : 0;
+  if (!w || !lw) return UNIT_MAX;
+  return Math.max(UNIT_MIN, Math.min(UNIT_MAX, Math.floor(w / lw)));
+}
+
+function setStageSize(box) {
+  box.style.width = model.layout.width * stage.u + "px";
+  box.style.height = model.layout.height * stage.u + "px";
+}
+
+function setCapGeometry(cap, p) {
+  cap.style.left = p.x * stage.u + stage.pad + "px";
+  cap.style.top = p.y * stage.u + stage.pad + "px";
+  cap.style.width = p.w * stage.u - 2 * stage.pad + "px";
+  cap.style.height = p.h * stage.u - 2 * stage.pad + "px";
+}
+
+// 文字がマスの幅に収まる大きさ(最大 maxPx、最小 9px)。半角は 0.6 文字ぶん、それ以外は 1 文字ぶんとして数える
+function fitFontSize(text, maxPx, capWidth) {
+  let units = 0;
+  for (const ch of text) units += ch.charCodeAt(0) < 0x250 ? 0.6 : 1;
+  if (units === 0) return maxPx;
+  return Math.max(9, Math.min(maxPx, Math.floor((capWidth - 8) / units)));
+}
+
+// マス1つの中身(index・短い名前)を作り直す。最初の表示と、SET のあとの更新の両方で使う
+// 16進は出さない(マスにカーソルを載せたときの title と、読み上げの文にだけ入れる)
 function fillCap(cap, layerIndex, index, code) {
+  const face = capFace(code, !stage.two);
   cap.replaceChildren();
-  cap.classList.toggle("none", code === 0x0000);
-  cap.classList.toggle("trans", code === 0x0001);
-  const idx = document.createElement("span");
-  idx.className = "idx";
-  idx.textContent = String(index);
-  const c = document.createElement("span");
-  c.className = "code";
-  c.textContent = hex4(code);
-  const note = document.createElement("span");
-  note.className = "note";
-  note.textContent = capNote(code);
-  cap.append(idx, c, note);
-  cap.dataset.label = "レイヤー " + layerIndex + " キー " + index + ": " + hex4(code) + " " + capNote(code);
+  cap.classList.toggle("none", face.kind === "none");
+  cap.classList.toggle("trans", face.kind === "trans");
+  if (stage.showIdx) {
+    const idx = document.createElement("span");
+    idx.className = "idx";
+    idx.setAttribute("aria-hidden", "true");
+    idx.textContent = String(index);
+    cap.append(idx);
+  }
+  if (face.small !== "") {
+    const small = document.createElement("span");
+    small.className = "small";
+    small.textContent = face.small;
+    cap.append(small);
+  }
+  const main = document.createElement("span");
+  main.className = "main";
+  const p = model.layout.layout[index];
+  main.style.fontSize = fitFontSize(face.main, face.kind === "normal" ? stage.mainSize : 12, p.w * stage.u - 2 * stage.pad) + "px";
+  main.textContent = face.main;
+  cap.append(main);
+  cap.title = hex4(code) + "  " + capNote(code);
+  cap.dataset.label = "レイヤー " + layerIndex + " キー " + index + ": " + capNote(code);
   cap.setAttribute("aria-label", cap.dataset.label);
 }
 
 function renderLayer(layerIndex, codes, info) {
-  // index = row * cols + col (protocol.md §2)。rows × cols が keys と合わないときは1行に並べる
-  const shapeOk = info.rows * info.cols === info.keys;
-  const cols = shapeOk ? info.cols : info.keys;
-
   const section = document.createElement("div");
   section.className = "layer";
   const h = document.createElement("h3");
-  h.textContent = "レイヤー " + layerIndex;
+  const name = model.layout.layerNames[layerIndex];
+  h.textContent = "レイヤー " + layerIndex + (name ? "  " + name : "");
   section.appendChild(h);
 
-  const grid = document.createElement("div");
-  grid.className = "grid";
-  grid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(78px, 1fr))";
+  // 機種定義(resolveLayout の結果)の位置と幅で、マスを並べる。位置がない index(null)には、マスを作らない
+  const wrap = document.createElement("div");
+  wrap.className = "stage-wrap";
+  const box = document.createElement("div");
+  box.className = "stage";
+  setStageSize(box);
 
   model.caps[layerIndex] = [];
+  model.stages[layerIndex] = box;
   codes.forEach((code, index) => {
+    const p = model.layout.layout[index];
+    if (!p) {
+      model.caps[layerIndex].push(null);
+      return;
+    }
     const cap = document.createElement("button");
     cap.type = "button";
     cap.className = "cap";
     cap.setAttribute("aria-pressed", "false");
     cap.addEventListener("click", () => selectKey(layerIndex, index));
+    setCapGeometry(cap, p);
     fillCap(cap, layerIndex, index, code);
-    grid.appendChild(cap);
+    box.appendChild(cap);
     model.caps[layerIndex].push(cap);
   });
 
-  section.appendChild(grid);
+  wrap.appendChild(box);
+  section.appendChild(wrap);
   els.keymap.appendChild(section);
-  return shapeOk;
+}
+
+// 画面の幅が変わったとき、マスの大きさと表示の形を合わせ直す
+let relayoutQueued = false;
+function relayoutStage() {
+  if (!model || model.caps.length === 0 || relayoutQueued) return;
+  relayoutQueued = true;
+  requestAnimationFrame(() => {
+    relayoutQueued = false;
+    if (!model) return;
+    const u = computeUnit();
+    if (u === stage.u) return;
+    setStageMetrics(u);
+    model.caps.forEach((row, l) => {
+      setStageSize(model.stages[l]);
+      row.forEach((cap, i) => {
+        if (!cap) return;
+        setCapGeometry(cap, model.layout.layout[i]);
+        fillCap(cap, l, i, model.codes[l][i]);
+      });
+    });
+    refreshDirtyMarks();
+  });
 }
 
 // INFO → 全レイヤーの DUMP を順に読んで表示する
@@ -544,7 +629,7 @@ async function loadAll() {
     const rawInfoResp = await request("INFO");
     const rawInfo = parseInfoData(rawInfoResp.data);
     const info = normalizeInfo(rawInfo);
-    // 機種定義(キーの位置と幅、既定のレイヤー名)を探す。いまは「デバイス情報」に出すだけで、マスの並びは変えない
+    // 機種定義(キーの位置と幅、既定のレイヤー名)を探して、マスの並びに使う
     const layoutResult = resolveLayout(info, findDeviceDef(info.name));
     renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
@@ -555,14 +640,15 @@ async function loadAll() {
     if (info.proto !== 1) {
       warnings.push("このツールは proto=1 用です。デバイスは proto=" + info.proto + " なので、正しく表示できない可能性があります。");
     }
-    if (info.rows * info.cols !== info.keys) {
+    if (info.rows * info.cols !== info.keys && layoutResult.source === "grid") {
       warnings.push("rows × cols (" + info.rows * info.cols + ") が keys (" + info.keys + ") と一致しないため、1行に並べて表示します。");
     }
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], selected: null };
+    model = { info, codes: [], caps: [], stages: [], layout: layoutResult, selected: null };
     els.keymapPanel.hidden = false;
+    setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
       const resp = await request("DUMP " + layer);
       const codes = parseDumpData(resp.data, info.keys);
@@ -655,6 +741,7 @@ function selectKey(layer, index) {
   if (!model || busy || transport === null) return;
   model.selected = { layer, index };
   model.caps.forEach((row, l) => row.forEach((cap, i) => {
+    if (!cap) return;
     const on = l === layer && i === index;
     cap.classList.toggle("selected", on);
     cap.classList.remove("set-failed");
@@ -786,6 +873,7 @@ function refreshDirtyMarks() {
   }
   const n = changedCount();
   model.caps.forEach((row, l) => row.forEach((cap, i) => {
+    if (!cap) return;
     const changed = model.codes[l][i] !== baseline[l][i];
     cap.classList.toggle("changed", changed);
     cap.setAttribute("aria-label", (cap.dataset.label || "") + (changed ? "(未保存の変更)" : ""));
@@ -818,8 +906,10 @@ async function readAllCodes() {
 function applyCodes(codes) {
   model.codes = codes;
   codes.forEach((row, l) => row.forEach((code, i) => {
-    fillCap(model.caps[l][i], l, i, code);
-    model.caps[l][i].classList.remove("set-failed");
+    const cap = model.caps[l][i];
+    if (!cap) return;
+    fillCap(cap, l, i, code);
+    cap.classList.remove("set-failed");
   }));
   if (model.selected) {
     els.kcHex.value = hex4(codes[model.selected.layer][model.selected.index]);
@@ -1128,6 +1218,7 @@ function init() {
     );
     return;
   }
+  window.addEventListener("resize", relayoutStage);
   els.connect.addEventListener("click", connect);
   els.reload.addEventListener("click", loadAll);
   els.disconnect.addEventListener("click", disconnect);

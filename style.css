@@ -51,7 +51,7 @@ body {
 }
 
 main, .foot {
-  max-width: 860px;
+  max-width: 1120px;
   margin: 0 auto;
   padding-left: 16px;
   padding-right: 16px;
@@ -85,7 +85,7 @@ select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .topbar { border-bottom: 1px solid var(--line-soft); }
 .topbar-inner {
   position: relative;
-  max-width: 860px;
+  max-width: 1120px;
   min-height: 56px;
   margin: 0 auto;
   padding: 0 16px;
@@ -177,28 +177,29 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 .layer:first-of-type { margin-top: 0; }
 .layer h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
 
-.grid {
-  display: grid;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
+/* キーの絵: 機種定義の位置と幅で、マスを並べる(大きさは app.js が決める)。広すぎるときは横にスクロール */
+.stage-wrap { overflow-x: auto; padding-bottom: 2px; }
+.stage { position: relative; margin: 0 auto; }
 
 .cap {
-  position: relative;
-  min-width: 78px;
-  padding: 6px 8px 10px;
+  position: absolute;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   background: var(--cap);
   border: 1px solid var(--cap-edge);
   border-bottom-width: 3px;
   border-radius: 5px;
   text-align: center;
+  line-height: 1.2;
 }
-.cap .idx { display: block; font-size: 10px; color: var(--muted); text-align: left; font-family: var(--mono); }
-.cap .code { display: block; font-family: var(--mono); font-size: 1.1rem; font-weight: 500; }
-.cap .note { display: block; font-size: 11px; color: var(--muted); min-height: 1.1em; }
+.cap .idx { position: absolute; left: 7px; top: 4px; font-size: 10px; color: var(--muted); font-family: var(--mono); }
+.cap .small { max-width: 100%; font-size: 10px; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
+.cap .main { max-width: 100%; overflow-wrap: anywhere; font-weight: 400; }
 .cap.none, .cap.trans { background: var(--cap-blank); border-color: var(--cap-blank-edge); }
-.cap.none .code { color: var(--off); }
+.cap.none .main, .cap.trans .main { color: var(--muted); }
 
 /* マスはクリックして選べる */
 .cap.selected { background: var(--sel-bg); border-color: var(--sel-edge); }
