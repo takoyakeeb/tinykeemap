@@ -302,6 +302,9 @@ const els = {
   menu: document.getElementById("menu"),
   menuReset: document.getElementById("menu-reset"),
   menuDetail: document.getElementById("menu-detail"),
+  menuLayout: document.getElementById("menu-layout"),
+  menuLayoutClear: document.getElementById("menu-layout-clear"),
+  layoutFile: document.getElementById("layout-file"),
   resetConfirm: document.getElementById("reset-confirm"),
   resetConfirmText: document.getElementById("reset-confirm-text"),
   resetCancel: document.getElementById("reset-cancel"),
@@ -381,6 +384,9 @@ function canOperate() {
 function updateSaveControls() {
   const usable = canOperate();
   els.btnSave.disabled = !usable;
+  els.menuLayout.disabled = !usable;
+  els.menuLayoutClear.hidden = !(model !== null && model.custom !== null);
+  els.menuLayoutClear.disabled = !usable;
   els.btnLoad.disabled = !usable;
   els.menuReset.disabled = !usable;
 }
@@ -630,7 +636,8 @@ async function loadAll() {
     const rawInfo = parseInfoData(rawInfoResp.data);
     const info = normalizeInfo(rawInfo);
     // 機種定義(キーの位置と幅、既定のレイヤー名)を探して、マスの並びに使う
-    const layoutResult = resolveLayout(info, findDeviceDef(info.name));
+    const custom = findCustomLayout(info.name);
+    const layoutResult = resolveLayout(info, findDeviceDef(info.name), custom);
     renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
@@ -646,7 +653,7 @@ async function loadAll() {
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, selected: null };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -1207,6 +1214,54 @@ async function disconnect() {
   await transport.close();
 }
 
+/* ---- 配列を読み込む(KLE の JSON ファイル) ---- */
+
+const LAYOUT_FILE_MAX = 1024 * 1024; // 1MB まで
+
+// 「…」メニューの「配列を読み込む…」: ファイルを選ぶ窓を開く
+function askLayoutFile() {
+  if (!canOperate()) return;
+  els.layoutFile.value = ""; // 同じファイルをもう一度選んでも、change が出るように
+  els.layoutFile.click();
+}
+
+// 選んだファイルを読んで、このデバイスに合えば使う(合わなければ、何も変えない)
+async function onLayoutFileChosen() {
+  const file = els.layoutFile.files && els.layoutFile.files[0];
+  if (!file || !canOperate()) return;
+  clearError();
+  const info = model.info;
+  let kle;
+  try {
+    if (file.size > LAYOUT_FILE_MAX) throw new Error("ファイルが大きすぎます(1MB まで)");
+    kle = JSON.parse(await file.text());
+  } catch (e) {
+    showError("配列を読み込めませんでした(" + file.name + "): " + (e instanceof SyntaxError ? "JSON として読めません" : e.message));
+    return;
+  }
+  const checked = checkKle(kle, info);
+  if (!checked.ok) {
+    showError("配列を使えませんでした(" + file.name + "): " + checked.reason);
+    return;
+  }
+  const { stored } = saveCustomLayout(info.name, kle, file.name);
+  await loadAll(); // 並びを作り直す(キーボードの内容と、未保存の変更はそのまま)
+  if (model === null) return; // 読み込みに失敗したときは、そちらのエラーを出したまま
+  if (stored) {
+    showSaveMessage("ok", "配列を読み込みました。次回の接続からも使います。");
+  } else {
+    showSaveMessage("info", "配列を読み込みました。このページを閉じるまで使えます。\n(localStorageへ保存ができませんでした。次回開く時はもう一度配列を読み込んでください。ブラウザの設定を確認してください。)");
+  }
+}
+
+// 「読み込んだ配列を消す」
+async function clearCustomLayout() {
+  if (!canOperate() || model.custom === null) return;
+  removeCustomLayout(model.info.name);
+  await loadAll();
+  if (model !== null) showSaveMessage("ok", "読み込んだ配列を消しました。");
+}
+
 /* ---- 上の1行: 「…」メニューと、確認の小窓 ---- */
 
 let detailOpen = false;
@@ -1252,6 +1307,9 @@ function initTopBar() {
   });
   els.menuReset.addEventListener("click", askReset);
   els.menuDetail.addEventListener("click", () => setDetailOpen(!detailOpen));
+  els.menuLayout.addEventListener("click", askLayoutFile);
+  els.menuLayoutClear.addEventListener("click", clearCustomLayout);
+  els.layoutFile.addEventListener("change", onLayoutFileChosen);
   els.resetCancel.addEventListener("click", () => {
     els.resetConfirm.hidden = true;
     els.btnMenu.focus();

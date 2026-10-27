@@ -112,25 +112,48 @@ function mapKeysToIndex(keys, info) {
   return { reason: "KLE のキー数(" + keys.length + ")が、デバイスのキー数(" + info.keys + ")と合いません(キーの文字に「行,列」も書かれていません)" };
 }
 
+// ファイルから読み込んだ KLE が、このデバイスに合うかを確かめる(保存する前の確認にも使う)
+//   戻り値: { ok: true, warnings } | { ok: false, reason: 文 }
+function checkKle(kle, info) {
+  const parsed = parseKle(kle);
+  if (parsed.keys.length === 0) return { ok: false, reason: parsed.warnings[0] || "KLE にキーがありません" };
+  const mapped = mapKeysToIndex(parsed.keys, info);
+  if (!mapped.layout) return { ok: false, reason: mapped.reason };
+  return { ok: true, warnings: parsed.warnings };
+}
+
 // 接続したデバイスの配列を決める。def は findDeviceDef の結果(なければ null)
-//   戻り値: { source: "matrix" | "order" | "grid", layout: [{ x, y, w, h } | null], layerNames: [文字列],
+//   custom は、ファイルから読み込んだ配列({ kle, fileName }。なければ null)。使う順番: custom → def → 格子
+//   戻り値: { source: "matrix" | "order" | "grid", origin: "custom" | "builtin" | "grid", originLabel: 文,
+//            layout: [{ x, y, w, h } | null], layerNames: [文字列],
 //            width, height(全体の大きさ。u), warnings: [文] }
 //   layout は index 順。null は、その index に対応するキーがない(画面には出さない)
-function resolveLayout(info, def) {
+function resolveLayout(info, def, custom) {
   const warnings = [];
   const layerNames = [];
   for (let i = 0; i < info.layers; i++) {
     layerNames.push(def && def.layers && def.layers[i] ? def.layers[i] : "");
   }
   let source = "grid";
+  let origin = "grid";
+  let originLabel = "";
   let layout = null;
-  if (def && def.kle) {
-    const parsed = parseKle(def.kle);
-    warnings.push(...parsed.warnings);
+  const tries = [];
+  if (custom && custom.kle) tries.push({ kle: custom.kle, origin: "custom", label: custom.fileName || "" });
+  if (def && def.kle) tries.push({ kle: def.kle, origin: "builtin", label: "" });
+  for (const t of tries) {
+    const parsed = parseKle(t.kle);
     const mapped = mapKeysToIndex(parsed.keys, info);
     if (mapped.layout) {
+      warnings.push(...parsed.warnings);
       layout = mapped.layout;
       source = mapped.mode;
+      origin = t.origin;
+      originLabel = t.label;
+      break;
+    }
+    if (t.origin === "custom") {
+      warnings.push("読み込んだ配列を使えないため、" + (def && def.kle ? "内蔵の配列" : "行×列の格子") + "で表示します: " + mapped.reason);
     } else {
       warnings.push("機種定義を使えないため、行×列の格子で表示します: " + mapped.reason);
     }
@@ -143,14 +166,67 @@ function resolveLayout(info, def) {
     width = Math.max(width, p.x + p.w);
     height = Math.max(height, p.y + p.h);
   }
-  return { source, layout, layerNames, width, height, warnings };
+  return { source, origin, originLabel, layout, layerNames, width, height, warnings };
 }
 
 // 「デバイス情報」に出す文
 function describeLayout(result) {
   const names = result.layerNames.filter((n) => n !== "");
   const nameText = names.length > 0 ? "。レイヤー名: " + names.join(", ") : "";
-  if (result.source === "matrix") return "内蔵(「行,列」の文字で対応づけ" + nameText + ")";
-  if (result.source === "order") return "内蔵(読む順番で対応づけ" + nameText + ")";
+  const how = result.source === "matrix" ? "「行,列」の文字で対応づけ" : "読む順番で対応づけ";
+  if (result.origin === "custom") {
+    return "読み込んだ配列" + (result.originLabel ? "(" + result.originLabel + "。" : "(") + how + nameText + ")";
+  }
+  if (result.source === "matrix" || result.source === "order") return "内蔵(" + how + nameText + ")";
   return "なし(行 × 列の格子で表示" + nameText + ")";
+}
+
+// ---- ファイルから読み込んだ配列の置き場(機種名ごと。ブラウザの localStorage) ----
+// localStorage が使えないとき(設定で止められている、など)は、このページを閉じるまで(メモリ上)だけ使う。
+// 戻り値の stored が false のとき、次回の接続では使えない。
+
+const CUSTOM_KEY_PREFIX = "tinykeemap.layout.";
+const customInMemory = {};
+
+function customKey(name) {
+  return CUSTOM_KEY_PREFIX + String(name).toLowerCase();
+}
+
+// 読み込んだ配列を探す(なければ null)。戻り値: { kle, fileName } | null
+function findCustomLayout(name) {
+  const key = customKey(name);
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw !== null) {
+      const v = JSON.parse(raw);
+      if (v && Array.isArray(v.kle)) return { kle: v.kle, fileName: String(v.fileName || "") };
+    }
+  } catch (e) {
+    // 読めないときは、メモリ上のものを使う
+  }
+  return customInMemory[key] || null;
+}
+
+// 読み込んだ配列を置く。戻り値: { stored: 次回の接続でも使えるか }
+function saveCustomLayout(name, kle, fileName) {
+  const key = customKey(name);
+  const value = { kle, fileName };
+  customInMemory[key] = value;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return { stored: true };
+  } catch (e) {
+    return { stored: false };
+  }
+}
+
+// 読み込んだ配列を消す(localStorage もメモリ上も)
+function removeCustomLayout(name) {
+  const key = customKey(name);
+  delete customInMemory[key];
+  try {
+    window.localStorage.removeItem(key);
+  } catch (e) {
+    // 消せなくても、メモリ上は消えている
+  }
 }

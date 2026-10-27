@@ -25,6 +25,8 @@
 
       <div id="menu" class="popup menu" role="menu" hidden>
         <button id="menu-reset" type="button" role="menuitem" disabled>初期のキーマップに戻す…</button>
+        <button id="menu-layout" type="button" role="menuitem" disabled title="KLE(keyboard-layout-editor.com)の JSON ファイルを選んで、キーの並びを変えます">配列を読み込む…</button>
+        <button id="menu-layout-clear" type="button" role="menuitem" hidden>読み込んだ配列を消す</button>
         <button id="menu-detail" type="button" role="menuitem" aria-expanded="false">デバイス情報・通信ログ</button>
         <button id="menu-reload" type="button" role="menuitem" disabled title="キーボードから、いまの内容を読み込み直します(保存済みの内容を読む「読み直す」とは別です)">再読み込み</button>
         <button id="menu-disconnect" type="button" role="menuitem" disabled>切断する</button>
@@ -40,6 +42,8 @@
       </div>
     </div>
   </header>
+
+  <input id="layout-file" type="file" accept=".json,application/json" hidden>
 
   <main>
     <div id="error" class="error" role="alert" hidden></div>
