@@ -466,7 +466,10 @@ function capNote(code) {
   const k = findKeycode(code);
   if (!k) return "(一覧にない値)";
   if (k.cap) return k.cap; // 修飾キー付きは「Shift+A」のように短く
-  return k.warn ? k.name + "(範囲外)" : k.name;
+  // レイヤー切り替えは、表示名が長いので、MO(1) のような名前を出す
+  if (k.group === "layer") return k.warn ? k.name + "(範囲外)" : k.name;
+  // ふつうのキーは、F11 や ← のような読みやすい表示名を出す(修飾キー付きと同じ表示にそろえる)
+  return k.label;
 }
 
 // マス1つの中身(index・keycode・注釈)を作り直す。最初の表示と、SET のあとの更新の両方で使う
