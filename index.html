@@ -8,39 +8,47 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top">
-    <h1>tinykeemap</h1>
-    <p class="lead">キーボードにUSBで接続して、キーマップを読み取り、変更して、保存します。</p>
+  <!-- 上の1行: 接続の点、未保存の変更の数、読み直す、保存する、「…」メニュー -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1 class="brand">tinykeemap</h1>
+      <div class="conn">
+        <span id="status-dot" class="dot dot-off" aria-hidden="true"></span>
+        <span id="status" class="status status-off">未接続</span>
+      </div>
+      <div class="spacer"></div>
+      <span id="dirty-badge" class="dirty-badge" role="status"></span>
+      <button id="btn-connect" class="btn-primary" type="button">接続する</button>
+      <button id="btn-load" class="btn-text" type="button" disabled title="キーボードに保存した内容を読み直します。未保存の変更は破棄されます">読み直す</button>
+      <button id="btn-save" class="btn-primary" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する</button>
+      <button id="btn-menu" class="btn-icon" type="button" aria-label="その他" aria-haspopup="menu" aria-expanded="false">···</button>
+
+      <div id="menu" class="popup menu" role="menu" hidden>
+        <button id="menu-reset" type="button" role="menuitem" disabled>初期のキーマップに戻す…</button>
+        <button id="menu-detail" type="button" role="menuitem" aria-expanded="false">デバイス情報・通信ログ</button>
+        <button id="menu-reload" type="button" role="menuitem" disabled title="キーボードから、いまの内容を読み込み直します(保存済みの内容を読む「読み直す」とは別です)">再読み込み</button>
+        <button id="menu-disconnect" type="button" role="menuitem" disabled>切断する</button>
+      </div>
+
+      <div id="reset-confirm" class="popup confirm" role="alertdialog" aria-labelledby="reset-confirm-title" hidden>
+        <div id="reset-confirm-title" class="confirm-title">初期のキーマップに戻しますか</div>
+        <p id="reset-confirm-text" class="confirm-text"></p>
+        <div class="confirm-actions">
+          <button id="reset-cancel" class="btn-text" type="button">やめる</button>
+          <button id="reset-ok" class="btn-primary" type="button">戻す</button>
+        </div>
+      </div>
+    </div>
   </header>
 
   <main>
-    <section class="panel" aria-labelledby="conn-title">
-      <h2 id="conn-title">接続</h2>
-      <div class="row">
-        <button id="btn-connect" type="button">接続する</button>
-        <button id="btn-reload" type="button" disabled>再読み込み</button>
-        <button id="btn-disconnect" type="button" disabled>切断する</button>
-        <span id="status" class="status status-off">未接続</span>
-      </div>
-      <div id="error" class="error" role="alert" hidden></div>
-    </section>
-
-    <section class="panel" id="info-panel" aria-labelledby="info-title" hidden>
-      <h2 id="info-title">デバイス情報</h2>
-      <dl id="info" class="info"></dl>
-    </section>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="save-msg" class="edit-msg" role="status" hidden></div>
 
     <section class="panel" id="keymap-panel" aria-labelledby="keymap-title" hidden>
       <h2 id="keymap-title">キーマップ</h2>
       <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。マスをクリックすると、下の「キーの編集」で変更できます。
         ● が付いたマスは、まだ保存していない変更です(接続したとき、または最後に保存・読み直しをしたときの内容との違い)。</p>
-      <div class="row save-bar">
-        <button id="btn-save" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する(SAVE)</button>
-        <button id="btn-load" type="button" disabled title="Flash に保存した内容を読み直します。未保存の変更は破棄されます">読み直す(LOAD)</button>
-        <button id="btn-reset" type="button" disabled title="初期キーマップに戻します。保存するまで Flash は変わりません">初期化(RESET)</button>
-        <span id="dirty-badge" class="dirty-badge" role="status"></span>
-      </div>
-      <div id="save-msg" class="edit-msg" role="status" hidden></div>
       <div id="keymap"></div>
     </section>
 
@@ -64,8 +72,11 @@
       <div id="edit-msg" class="edit-msg" role="status" hidden></div>
     </section>
 
-    <section class="panel" aria-labelledby="log-title">
-      <h2 id="log-title">通信ログ</h2>
+    <!-- 「…」メニューの「デバイス情報・通信ログ」で開く -->
+    <section class="panel" id="detail" aria-label="デバイス情報・通信ログ" hidden>
+      <h2 id="info-title">デバイス情報</h2>
+      <dl id="info" class="info"></dl>
+      <h2 id="log-title" class="detail-sub">通信ログ</h2>
       <pre id="log" class="log" aria-live="off"></pre>
     </section>
   </main>

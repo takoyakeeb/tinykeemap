@@ -291,12 +291,21 @@ function hex4(n) {
 
 const els = {
   connect: document.getElementById("btn-connect"),
-  reload: document.getElementById("btn-reload"),
-  disconnect: document.getElementById("btn-disconnect"),
+  reload: document.getElementById("menu-reload"),
+  disconnect: document.getElementById("menu-disconnect"),
   status: document.getElementById("status"),
+  statusDot: document.getElementById("status-dot"),
   error: document.getElementById("error"),
-  infoPanel: document.getElementById("info-panel"),
+  detail: document.getElementById("detail"),
   info: document.getElementById("info"),
+  btnMenu: document.getElementById("btn-menu"),
+  menu: document.getElementById("menu"),
+  menuReset: document.getElementById("menu-reset"),
+  menuDetail: document.getElementById("menu-detail"),
+  resetConfirm: document.getElementById("reset-confirm"),
+  resetConfirmText: document.getElementById("reset-confirm-text"),
+  resetCancel: document.getElementById("reset-cancel"),
+  resetOk: document.getElementById("reset-ok"),
   keymapPanel: document.getElementById("keymap-panel"),
   keymap: document.getElementById("keymap"),
   editPanel: document.getElementById("edit-panel"),
@@ -309,7 +318,6 @@ const els = {
   editMsg: document.getElementById("edit-msg"),
   btnSave: document.getElementById("btn-save"),
   btnLoad: document.getElementById("btn-load"),
-  btnReset: document.getElementById("btn-reset"),
   dirtyBadge: document.getElementById("dirty-badge"),
   saveMsg: document.getElementById("save-msg"),
   log: document.getElementById("log"),
@@ -330,6 +338,7 @@ let lateCapture = null;
 function setStatus(kind, text) {
   els.status.className = "status status-" + kind;
   els.status.textContent = text;
+  els.statusDot.className = "dot dot-" + kind;
 }
 
 function showError(message, isWarning) {
@@ -355,6 +364,7 @@ function log(kind, text) {
 function updateButtons() {
   const connected = transport !== null;
   const broken = connected && transport.syncState === "broken"; // 応答が途絶えた。接続し直すまで操作できない
+  els.connect.hidden = connected; // 接続中は、上の1行に出さない(切断は「…」メニュー)
   els.connect.disabled = connected || busy;
   els.reload.disabled = !connected || busy || broken;
   els.disconnect.disabled = !connected;
@@ -371,7 +381,7 @@ function updateSaveControls() {
   const usable = canOperate();
   els.btnSave.disabled = !usable;
   els.btnLoad.disabled = !usable;
-  els.btnReset.disabled = !usable;
+  els.menuReset.disabled = !usable;
 }
 
 function updateEditControls() {
@@ -383,7 +393,7 @@ function updateEditControls() {
 }
 
 function clearResults() {
-  els.infoPanel.hidden = true;
+  closePopups();
   els.keymapPanel.hidden = true;
   els.editPanel.hidden = true;
   els.info.replaceChildren();
@@ -457,7 +467,6 @@ function renderInfo(info, rawInfo, layoutResult) {
     dd.textContent = value;
     els.info.append(dt, dd);
   }
-  els.infoPanel.hidden = false;
 }
 
 // マスの下に添える注釈(名前など)
@@ -715,7 +724,7 @@ async function handleSetError(e, layer, index, code, cap) {
     if (e.code === "BADARG") {
       showEditMessage("fail", where + " は変更できませんでした。デバイスが " + keycodeHex(code) + " に対応していません(" + detail + ")。キーマップは変わっていません。");
     } else if (e.code === "RANGE") {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスが、レイヤーまたはキー番号を範囲外だと言っています(" + detail + ")。ツールとデバイスの設定が食い違っているので、「再読み込み」で読み直してください。");
+      showEditMessage("fail", where + " は変更できませんでした。デバイスが、レイヤーまたはキー番号を範囲外だと言っています(" + detail + ")。ツールとデバイスの設定が食い違っているので、「…」メニューの「再読み込み」で読み直してください。");
     } else {
       showEditMessage("fail", where + " は変更できませんでした。デバイスがエラーを返しました(" + detail + ")。");
     }
@@ -773,8 +782,6 @@ function changedCount() {
 function refreshDirtyMarks() {
   if (!model || !baselineFits(model.codes)) {
     els.dirtyBadge.textContent = "";
-    els.dirtyBadge.className = "dirty-badge";
-    els.btnSave.classList.remove("dirty");
     return;
   }
   const n = changedCount();
@@ -783,9 +790,7 @@ function refreshDirtyMarks() {
     cap.classList.toggle("changed", changed);
     cap.setAttribute("aria-label", (cap.dataset.label || "") + (changed ? "(未保存の変更)" : ""));
   }));
-  els.dirtyBadge.textContent = n > 0 ? "未保存の変更: " + n + " キー" : "変更なし(保存済みと同じ)";
-  els.dirtyBadge.className = "dirty-badge " + (n > 0 ? "dirty" : "clean");
-  els.btnSave.classList.toggle("dirty", n > 0);
+  els.dirtyBadge.textContent = n > 0 ? "● 未保存の変更 " + n : "";
 }
 
 function showSaveMessage(kind, text) {
@@ -868,11 +873,11 @@ function showSaveError(cmd, e) {
     }
   } else if (e instanceof SyncBrokenError) {
     msg = cmd === "SAVE"
-      ? "保存できたかどうか分かりません。デバイスから応答がありません。「切断する」で接続し直して、キーマップを確認し、必要ならもう一度保存してください。"
-      : name + "の結果が分かりません。デバイスから応答がありません。「切断する」で接続し直してください。";
+      ? "保存できたかどうか分かりません。デバイスから応答がありません。「…」メニューの「切断する」で接続し直して、キーマップを確認し、必要ならもう一度保存してください。"
+      : name + "の結果が分かりません。デバイスから応答がありません。「…」メニューの「切断する」で接続し直してください。";
   } else {
     msg = name + "に失敗しました。" + describeError(e) +
-      (cmd === "SAVE" ? "" : "\nキーボードの今の内容は「再読み込み」で確認できます。");
+      (cmd === "SAVE" ? "" : "\nキーボードの今の内容は「…」メニューの「再読み込み」で確認できます。");
   }
   showSaveMessage("fail", msg);
 }
@@ -928,8 +933,6 @@ async function doLoad() {
 // 初期キーマップに戻す(キーボードの RAM だけ。Flash は「保存する」を押すまで変わらない)
 async function doReset() {
   if (!canOperate()) return;
-  const n = changedCount();
-  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n初期キーマップに戻すと、これらの変更は破棄されます(Flash は「保存する」を押すまで変わりません)。続けますか?")) return;
   busy = true;
   updateButtons();
   clearSaveMessage();
@@ -939,7 +942,7 @@ async function doReset() {
     const codes = await readAllCodes();
     applyCodes(codes);
     showSaveMessage("ok", "初期キーマップに戻しました。まだ保存していません。" +
-      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す(LOAD)」を押してください。" : ""));
+      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す」を押してください。" : ""));
   } catch (e) {
     if (transport === null) return;
     showSaveError("RESET", e);
@@ -956,10 +959,10 @@ function describeError(e) {
   }
   if (e instanceof SyncBrokenError) {
     return "デバイスから応答がありません(遅れて届く応答も約 " + LATE_GRACE_MS / 1000 + " 秒待ちましたが、来ませんでした)。\n" +
-      "「切断する」を押して、もう一度接続してください。";
+      "「…」メニューの「切断する」を押して、もう一度接続してください。";
   }
   if (e instanceof TimeoutError) {
-    return e.message + "\n遅れて届く応答を最大約 " + LATE_GRACE_MS / 1000 + " 秒待ちます。そのあとで「再読み込み」を押してください。\n" +
+    return e.message + "\n遅れて届く応答を最大約 " + LATE_GRACE_MS / 1000 + " 秒待ちます。そのあとで「…」メニューの「再読み込み」を押してください。\n" +
       "何度も続く場合は、デバイスのファームが USBシリアルのコマンドに対応しているか、debug 出力が有効になっていないか確認してください。";
   }
   return e.message || String(e);
@@ -1045,11 +1048,77 @@ async function disconnect() {
   await transport.close();
 }
 
+/* ---- 上の1行: 「…」メニューと、確認の小窓 ---- */
+
+let detailOpen = false;
+
+function setMenuOpen(open) {
+  els.menu.hidden = !open;
+  els.btnMenu.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+// メニューと確認の小窓を、どちらも閉じる
+function closePopups() {
+  setMenuOpen(false);
+  els.resetConfirm.hidden = true;
+}
+
+// 「デバイス情報・通信ログ」を開く・閉じる
+function setDetailOpen(open) {
+  detailOpen = open;
+  els.detail.hidden = !open;
+  els.menuDetail.setAttribute("aria-expanded", open ? "true" : "false");
+  els.menuDetail.textContent = open ? "デバイス情報・通信ログを閉じる" : "デバイス情報・通信ログ";
+  if (open) els.detail.scrollIntoView({ block: "start" });
+}
+
+// 「初期のキーマップに戻す…」: 確認の小窓を出す(RESET を送るのは「戻す」を押したとき)
+function askReset() {
+  if (!canOperate()) return;
+  const n = changedCount();
+  els.resetConfirmText.textContent = "「保存する」を押すまでは、キーボードの保存内容は変わりません。" +
+    (n > 0 ? "\n未保存の変更 " + n + " キーは、破棄されます。" : "");
+  els.resetConfirm.hidden = false;
+  els.resetCancel.focus();
+}
+
+function initTopBar() {
+  els.btnMenu.addEventListener("click", () => {
+    const wasOpen = !els.menu.hidden;
+    closePopups();
+    setMenuOpen(!wasOpen);
+  });
+  els.menu.addEventListener("click", (ev) => {
+    if (ev.target.closest("button")) setMenuOpen(false); // 項目を押したら、メニューは閉じる
+  });
+  els.menuReset.addEventListener("click", askReset);
+  els.menuDetail.addEventListener("click", () => setDetailOpen(!detailOpen));
+  els.resetCancel.addEventListener("click", () => {
+    els.resetConfirm.hidden = true;
+    els.btnMenu.focus();
+  });
+  els.resetOk.addEventListener("click", () => {
+    els.resetConfirm.hidden = true;
+    doReset();
+  });
+  // 外側を押す、または Esc で閉じる
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest("#menu, #reset-confirm, #btn-menu")) closePopups();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && (!els.menu.hidden || !els.resetConfirm.hidden)) {
+      closePopups();
+      els.btnMenu.focus();
+    }
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* 起動                                                                 */
 /* ------------------------------------------------------------------ */
 
 function init() {
+  initTopBar();
   if (!("serial" in navigator)) {
     els.connect.disabled = true;
     setStatus("err", "このブラウザは非対応です");
@@ -1081,7 +1150,6 @@ function init() {
   // 保存・読み直し・初期化
   els.btnSave.addEventListener("click", doSave);
   els.btnLoad.addEventListener("click", doLoad);
-  els.btnReset.addEventListener("click", doReset);
   // 未保存の変更があるまま、ページを閉じたり移動したりしようとしたときの警告
   window.addEventListener("beforeunload", (ev) => {
     if (transport !== null && changedCount() > 0) {
