@@ -234,14 +234,28 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
   background: var(--unsaved);
 }
 
-/* キーの編集 */
-.edit-target { margin: 0 0 12px; }
+/* 下のパネル(キーの編集)。絵の下で、画面の下にくっつく */
+.edit-dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-top: 16px;
+  padding: 14px 0 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+.edit-dock h2 { margin-bottom: 8px; }
+.edit-target { margin: 0 0 8px; }
+.edit-target-label { margin-right: 8px; font-size: 11px; color: var(--muted); }
 .edit-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  grid-template-columns: 200px minmax(0, 1fr) 300px;
+  gap: 24px;
   align-items: start;
 }
+.edit-card .hint { margin: 0; }
 .edit-grid label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted); }
 .edit-grid input,
 .edit-grid select {
@@ -288,9 +302,13 @@ main > .edit-msg { margin-top: 16px; }
 
 .foot { padding-top: 20px; padding-bottom: 32px; color: var(--muted); font-size: 12px; }
 
+@media (max-width: 760px) {
+  .edit-grid { grid-template-columns: 1fr; gap: 16px; }
+}
+
 @media (max-width: 520px) {
   .info { grid-template-columns: 1fr; gap: 0; }
   .info dd { margin-bottom: 6px; }
-  .edit-grid { grid-template-columns: 1fr; }
+  .edit-grid { grid-template-columns: 1fr; gap: 16px; }
   .popup { right: 8px; }
 }

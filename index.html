@@ -54,15 +54,18 @@
       <div id="keymap"></div>
     </section>
 
-    <section class="panel" id="edit-panel" aria-labelledby="edit-title" hidden>
-      <h2 id="edit-title">キーの編集</h2>
-      <p class="hint">上のマスを選び、割り当てる keycode を選んで「変更する」を押します。変更はすぐにキーボードの入力へ反映されますが、「保存する」を押すまでは保存されません(USBを抜き差しすると、保存済みの内容に戻ります)。</p>
-      <p class="edit-target">選択中: <strong id="edit-target">(なし)</strong></p>
+    <!-- 下のパネル(画面の下にくっつける)。中身は、段階4で作り直す -->
+    <section class="panel edit-dock" id="edit-panel" aria-labelledby="edit-title" hidden>
       <div class="edit-grid">
+        <div class="edit-card">
+          <h2 id="edit-title">キーの編集</h2>
+          <p class="edit-target"><span class="edit-target-label">選択中</span><strong id="edit-target">(なし)</strong></p>
+          <p class="hint">マスを選び、割り当てる keycode を選んで「変更する」を押します。変更はすぐキーボードの入力へ反映されますが、「保存する」を押すまでは保存されません(USBを抜き差しすると、保存済みの内容に戻ります)。</p>
+        </div>
         <div class="edit-pick">
           <label for="kc-search">名前で絞り込み</label>
           <input id="kc-search" type="search" placeholder="例: A, Enter, F5, KC_ESC" autocomplete="off" disabled>
-          <select id="kc-list" size="10" aria-label="keycode の一覧" disabled></select>
+          <select id="kc-list" size="6" aria-label="keycode の一覧" disabled></select>
         </div>
         <div class="edit-value">
           <label for="kc-hex">keycode(16進、または名前。例: 0x0004、KC_A、MO(1)、LSFT(KC_A))</label>
