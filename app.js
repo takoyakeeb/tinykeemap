@@ -313,7 +313,11 @@ const els = {
   keymap: document.getElementById("keymap"),
   layerTabs: document.getElementById("layer-tabs"),
   editPanel: document.getElementById("edit-panel"),
-  editTarget: document.getElementById("edit-target"),
+  editTitle: document.getElementById("edit-title"),
+  btnDeselect: document.getElementById("btn-deselect"),
+  cardBody: document.getElementById("card-body"),
+  cardCap: document.getElementById("card-cap"),
+  cardName: document.getElementById("card-name"),
   kcSearch: document.getElementById("kc-search"),
   kcList: document.getElementById("kc-list"),
   kcHex: document.getElementById("kc-hex"),
@@ -409,7 +413,6 @@ function clearResults() {
   model = null;
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
   populateKeycodeList(els.kcSearch.value);
-  els.editTarget.textContent = "(なし)";
   els.kcHex.value = "";
   updatePreview();
   clearEditMessage();
@@ -559,7 +562,8 @@ function fillCap(cap, layerIndex, index, code) {
   main.style.fontSize = fitFontSize(face.main, face.kind === "normal" ? stage.mainSize : 12, p.w * stage.u - 2 * stage.pad) + "px";
   main.textContent = face.main;
   cap.append(main);
-  cap.title = hex4(code) + "  " + capNote(code);
+  cap.dataset.title = hex4(code) + "  " + capNote(code);
+  cap.title = cap.dataset.title;
   cap.dataset.label = "レイヤー " + layerIndex + " キー " + index + ": " + capNote(code);
   cap.setAttribute("aria-label", cap.dataset.label);
 }
@@ -796,11 +800,38 @@ function deselectKey() {
     cap.classList.remove("selected", "set-failed");
     cap.setAttribute("aria-pressed", "false");
   }));
-  els.editTarget.textContent = "(なし)";
   els.kcHex.value = "";
+  updateCard();
   updatePreview();
   clearEditMessage();
   updateEditControls();
+}
+
+// 左のカード(選んだキー)を、いまの選びに合わせる
+function updateCard() {
+  const sel = model ? model.selected : null;
+  els.cardBody.hidden = sel === null;
+  els.editTitle.textContent = sel === null ? "キーを選んでください" : "キー " + sel.index;
+  if (sel === null) return;
+  const code = model.codes[sel.layer][sel.index];
+  // 絵(マスと同じ2段。小さいときの1行にはしない)
+  const face = capFace(code, false);
+  els.cardCap.replaceChildren();
+  els.cardCap.classList.toggle("none", face.kind === "none");
+  els.cardCap.classList.toggle("trans", face.kind === "trans");
+  if (face.small !== "") {
+    const small = document.createElement("span");
+    small.className = "small";
+    small.textContent = face.small;
+    els.cardCap.append(small);
+  }
+  const main = document.createElement("span");
+  main.className = "main";
+  main.textContent = face.main;
+  els.cardCap.append(main);
+  // 名前(16進は出さない。一覧にない値だけ16進)
+  const k = findKeycode(code);
+  els.cardName.textContent = k ? k.label : "一覧にない値 " + keycodeHex(code);
 }
 
 function setCurrentLayer(layer) {
@@ -814,6 +845,10 @@ function setCurrentLayer(layer) {
 // マスをクリックして選ぶ
 function selectKey(layer, index) {
   if (!model || busy || transport === null) return;
+  if (model.selected && model.selected.layer === layer && model.selected.index === index) {
+    deselectKey(); // 選んでいるマスをもう一度押すと、選びを外す
+    return;
+  }
   model.selected = { layer, index };
   model.caps.forEach((row, l) => row.forEach((cap, i) => {
     if (!cap) return;
@@ -822,8 +857,8 @@ function selectKey(layer, index) {
     cap.classList.remove("set-failed");
     cap.setAttribute("aria-pressed", on ? "true" : "false");
   }));
-  els.editTarget.textContent = "レイヤー " + layer + " / キー " + index;
   els.kcHex.value = hex4(model.codes[layer][index]);
+  updateCard();
   updatePreview();
   clearEditMessage();
   updateEditControls();
@@ -943,6 +978,7 @@ function changedCount() {
 // 変更したマスの印(●)と、「未保存の変更: N キー」の表示を更新する
 function refreshDirtyMarks() {
   updateTabs();
+  updateCard();
   if (!model || !baselineFits(model.codes)) {
     els.dirtyBadge.textContent = "";
     return;
@@ -952,6 +988,7 @@ function refreshDirtyMarks() {
     if (!cap) return;
     const changed = model.codes[l][i] !== baseline[l][i];
     cap.classList.toggle("changed", changed);
+    cap.title = (cap.dataset.title || "") + (changed ? "  ・未保存の変更" : "");
     cap.setAttribute("aria-label", (cap.dataset.label || "") + (changed ? "(未保存の変更)" : ""));
   }));
   els.dirtyBadge.textContent = n > 0 ? "● 未保存の変更 " + n : "";
@@ -1365,6 +1402,7 @@ function init() {
     }
   });
   els.btnSet.addEventListener("click", applyEdit);
+  els.btnDeselect.addEventListener("click", deselectKey);
   // 保存・読み直し・初期化
   els.btnSave.addEventListener("click", doSave);
   els.btnLoad.addEventListener("click", doLoad);
