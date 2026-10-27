@@ -173,9 +173,26 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 
 .hint { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
 
-.layer { margin-top: 18px; }
-.layer:first-of-type { margin-top: 0; }
-.layer h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.layer { margin-top: 0; }
+
+/* レイヤーのタブ(絵の真上) */
+.tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; margin-bottom: 16px; }
+.tabs-label { margin-right: 12px; font-size: 11px; letter-spacing: 0.08em; color: var(--muted); }
+.tab {
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tab:hover:not(:disabled) { border-color: transparent; border-bottom-color: var(--line-key); color: var(--ink); }
+.tab.active { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
+.tab-num { font-family: var(--mono); font-size: 11px; }
+.tab-num + .tab-name:not(:empty) { margin-left: 8px; }
+.tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--unsaved); vertical-align: middle; }
 
 /* キーの絵: 機種定義の位置と幅で、マスを並べる(大きさは app.js が決める)。広すぎるときは横にスクロール */
 .stage-wrap { overflow-x: auto; padding-bottom: 2px; }

@@ -308,6 +308,7 @@ const els = {
   resetOk: document.getElementById("reset-ok"),
   keymapPanel: document.getElementById("keymap-panel"),
   keymap: document.getElementById("keymap"),
+  layerTabs: document.getElementById("layer-tabs"),
   editPanel: document.getElementById("edit-panel"),
   editTarget: document.getElementById("edit-target"),
   kcSearch: document.getElementById("kc-search"),
@@ -398,6 +399,7 @@ function clearResults() {
   els.editPanel.hidden = true;
   els.info.replaceChildren();
   els.keymap.replaceChildren();
+  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
   model = null;
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
   populateKeycodeList(els.kcSearch.value);
@@ -559,10 +561,8 @@ function fillCap(cap, layerIndex, index, code) {
 function renderLayer(layerIndex, codes, info) {
   const section = document.createElement("div");
   section.className = "layer";
-  const h = document.createElement("h3");
-  const name = model.layout.layerNames[layerIndex];
-  h.textContent = "レイヤー " + layerIndex + (name ? "  " + name : "");
-  section.appendChild(h);
+  section.hidden = layerIndex !== model.current; // 絵に出すのは、いま選んでいるレイヤーだけ
+  model.sections[layerIndex] = section;
 
   // 機種定義(resolveLayout の結果)の位置と幅で、マスを並べる。位置がない index(null)には、マスを作らない
   const wrap = document.createElement("div");
@@ -646,7 +646,7 @@ async function loadAll() {
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], stages: [], layout: layoutResult, selected: null };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, selected: null };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -655,6 +655,7 @@ async function loadAll() {
       model.codes[layer] = codes;
       renderLayer(layer, codes, info);
     }
+    buildTabs();
     // 最初の読み込みでは、今の内容を「保存済み」とみなす。再読み込みでは、前の基準を保つ
     if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
     refreshDirtyMarks();
@@ -734,6 +735,73 @@ function updatePreview() {
     : "  一覧にない値です。デバイスが対応していなければ、エラーになります");
   if (k) els.kcList.value = String(p.code);
   else els.kcList.selectedIndex = -1;
+}
+
+/* ---- レイヤーのタブ ---- */
+
+function buildTabs() {
+  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
+  model.tabs = model.codes.map((_, l) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tab";
+    const num = document.createElement("span");
+    num.className = "tab-num";
+    num.textContent = String(l);
+    const name = document.createElement("span");
+    name.className = "tab-name";
+    const dot = document.createElement("span");
+    dot.className = "tab-dot";
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", "未保存の変更あり");
+    btn.append(num, name, dot);
+    btn.addEventListener("click", () => setCurrentLayer(l));
+    els.layerTabs.appendChild(btn);
+    return { btn, name, dot };
+  });
+  updateTabs();
+}
+
+// 名前と「空」と ● を更新する。名前は機種定義の既定の名前。名前がなくて、中身がすべて「透過」なら「空」
+function updateTabs() {
+  if (!model || !model.tabs) return;
+  const fit = baselineFits(model.codes);
+  model.tabs.forEach((t, l) => {
+    const codes = model.codes[l];
+    const empty = codes.every((c) => c === 0x0001);
+    const label = model.layout.layerNames[l] || (empty ? "空" : "");
+    const changed = fit && codes.some((c, i) => c !== baseline[l][i]);
+    const active = l === model.current;
+    t.name.textContent = label;
+    t.dot.hidden = !changed;
+    t.btn.classList.toggle("active", active);
+    t.btn.setAttribute("aria-pressed", active ? "true" : "false");
+    t.btn.setAttribute("aria-label", "レイヤー " + l + (label ? " " + label : "") + (changed ? "(未保存の変更あり)" : ""));
+  });
+}
+
+// 選んでいるキーを、選んでいない状態に戻す(レイヤーを替えるときに使う)
+function deselectKey() {
+  if (!model) return;
+  model.selected = null;
+  model.caps.forEach((row) => row.forEach((cap) => {
+    if (!cap) return;
+    cap.classList.remove("selected", "set-failed");
+    cap.setAttribute("aria-pressed", "false");
+  }));
+  els.editTarget.textContent = "(なし)";
+  els.kcHex.value = "";
+  updatePreview();
+  clearEditMessage();
+  updateEditControls();
+}
+
+function setCurrentLayer(layer) {
+  if (!model || layer === model.current) return;
+  deselectKey(); // 別のレイヤーのキーを選んだままにしない
+  model.current = layer;
+  model.sections.forEach((sec, l) => { sec.hidden = l !== layer; });
+  updateTabs();
 }
 
 // マスをクリックして選ぶ
@@ -867,6 +935,7 @@ function changedCount() {
 
 // 変更したマスの印(●)と、「未保存の変更: N キー」の表示を更新する
 function refreshDirtyMarks() {
+  updateTabs();
   if (!model || !baselineFits(model.codes)) {
     els.dirtyBadge.textContent = "";
     return;
