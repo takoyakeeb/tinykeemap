@@ -434,7 +434,7 @@ async function doRequest(command, timeoutMs) {
   return parseResponse(line);
 }
 
-function renderInfo(info, rawInfo) {
+function renderInfo(info, rawInfo, layoutResult) {
   els.info.replaceChildren();
   const rows = [
     ["機種名 (name)", info.name],
@@ -443,6 +443,7 @@ function renderInfo(info, rawInfo) {
     ["キー数 (keys)", String(info.keys)],
     ["行 × 列 (rows × cols)", info.rows + " × " + info.cols],
     ["レイヤー数 (layers)", String(info.layers)],
+    ["機種定義 (配列)", describeLayout(layoutResult)],
   ];
   // 知らないキーも、将来の確認用にそのまま表示する
   const known = new Set(["name", "proto", "fw", "keys", "rows", "cols", "layers"]);
@@ -534,7 +535,9 @@ async function loadAll() {
     const rawInfoResp = await request("INFO");
     const rawInfo = parseInfoData(rawInfoResp.data);
     const info = normalizeInfo(rawInfo);
-    renderInfo(info, rawInfo);
+    // 機種定義(キーの位置と幅、既定のレイヤー名)を探す。いまは「デバイス情報」に出すだけで、マスの並びは変えない
+    const layoutResult = resolveLayout(info, findDeviceDef(info.name));
+    renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
     populateKeycodeList(els.kcSearch.value);
@@ -546,6 +549,8 @@ async function loadAll() {
     if (info.rows * info.cols !== info.keys) {
       warnings.push("rows × cols (" + info.rows * info.cols + ") が keys (" + info.keys + ") と一致しないため、1行に並べて表示します。");
     }
+
+    warnings.push(...layoutResult.warnings);
 
     model = { info, codes: [], caps: [], selected: null };
     els.keymapPanel.hidden = false;
