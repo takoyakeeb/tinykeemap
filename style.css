@@ -474,7 +474,7 @@ body.is-off #dirty-badge { display: none; }
 .welcome-reason:empty { display: none; }
 .welcome-unsupported { margin: 26px auto 0; max-width: 380px; text-align: left; font-size: 12px; }
 .wu-row { display: flex; gap: 16px; padding: 8px 0; border-top: 1px solid var(--line-soft); }
-.wu-row:nth-child(2) { border-bottom: 1px solid var(--line-soft); }
+.wu-row:nth-child(3) { border-bottom: 1px solid var(--line-soft); }
 .wu-key { flex: 0 0 64px; color: var(--muted); }
 .wu-url { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .wu-addr { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
