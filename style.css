@@ -406,6 +406,8 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 #btn-set:disabled { background: #c9cac3; border-color: #c9cac3; color: #fff; }
 .edit-msg { margin-top: 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; }
 main > .edit-msg { margin-top: 16px; }
+/* キーの編集のメッセージは、左のカードの下に出す(下の一覧が長くても、スクロールせずに見える) */
+.edit-card .edit-msg { margin-top: 14px; padding: 8px 10px; font-size: 12px; text-align: left; word-break: keep-all; overflow-wrap: break-word; }
 .edit-msg.ok { background: var(--done-bg); color: var(--done-ink); }
 .edit-msg.fail { background: var(--err-bg); color: var(--err-ink); }
 .edit-msg.info { background: var(--note-bg); color: var(--ink); }
