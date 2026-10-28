@@ -18,7 +18,7 @@
       </div>
       <div class="spacer"></div>
       <span id="dirty-badge" class="dirty-badge" role="status"></span>
-      <button id="btn-connect" class="btn-primary" type="button">接続する</button>
+      <a id="link-readme" class="topbar-link" href="https://github.com/takoyakeeb/tinykeemap/blob/main/README.md">README</a>
       <button id="btn-load" class="btn-text" type="button" disabled title="キーボードに保存した内容を読み直します。未保存の変更は破棄されます">読み直す</button>
       <button id="btn-save" class="btn-primary" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する</button>
       <button id="btn-menu" class="btn-icon" type="button" aria-label="その他" aria-haspopup="menu" aria-expanded="false">···</button>
@@ -47,6 +47,31 @@
   <input id="layout-file" type="file" accept=".json,application/json" hidden>
 
   <main>
+    <!-- 未接続・非対応ブラウザの画面(接続すると隠れる)。app.js が文言を入れる -->
+    <section id="welcome" class="welcome" aria-labelledby="welcome-title">
+      <div class="ghosts" aria-hidden="true">
+        <span></span><span></span><span class="w2"></span><span class="w2"></span><span></span><span></span>
+      </div>
+      <h2 id="welcome-title" class="welcome-title">キーボードをつないでください</h2>
+      <p id="welcome-body" class="welcome-body">USBでつないで、「接続する」を押すと、いまのキーの割り当てを読み取ります。</p>
+      <div class="welcome-act">
+        <button id="btn-connect" class="btn-primary btn-big" type="button">接続する</button>
+      </div>
+      <div id="welcome-error" class="welcome-note" role="alert" hidden>
+        <span id="welcome-cable">USBケーブルは、データ通信できるものを使ってください(充電専用のケーブルでは、つながりません)。</span>
+        <span id="welcome-reason" class="welcome-reason"></span>
+      </div>
+      <div id="welcome-unsupported" class="welcome-unsupported" hidden>
+        <div class="wu-row"><span class="wu-key">使える</span><span>Chrome、Edge(PC版)</span></div>
+        <div class="wu-row"><span class="wu-key">使えない</span><span>Safari、Firefox、スマートフォンのブラウザ</span></div>
+        <div class="wu-url">
+          <span id="welcome-url" class="wu-addr"></span>
+          <button id="btn-copy-url" type="button">リンクをコピー</button>
+        </div>
+      </div>
+      <p id="welcome-help" class="welcome-help">うまくいかないときは、<a href="https://github.com/takoyakeeb/tinykeemap/blob/main/README.md">README</a> を見てください。</p>
+    </section>
+
     <div id="error" class="error" role="alert" hidden></div>
     <div id="save-msg" class="edit-msg" role="status" hidden></div>
 

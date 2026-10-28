@@ -291,6 +291,17 @@ function hex4(n) {
 
 const els = {
   connect: document.getElementById("btn-connect"),
+  welcome: document.getElementById("welcome"),
+  welcomeTitle: document.getElementById("welcome-title"),
+  welcomeBody: document.getElementById("welcome-body"),
+  welcomeError: document.getElementById("welcome-error"),
+  welcomeReason: document.getElementById("welcome-reason"),
+  welcomeCable: document.getElementById("welcome-cable"),
+  welcomeUnsupported: document.getElementById("welcome-unsupported"),
+  welcomeUrl: document.getElementById("welcome-url"),
+  welcomeHelp: document.getElementById("welcome-help"),
+  btnCopyUrl: document.getElementById("btn-copy-url"),
+  conn: document.querySelector(".conn"),
   reload: document.getElementById("menu-reload"),
   disconnect: document.getElementById("menu-disconnect"),
   status: document.getElementById("status"),
@@ -363,6 +374,49 @@ function setStatus(kind, text) {
   els.statusDot.className = "dot dot-" + kind;
 }
 
+// 未接続・非対応ブラウザの画面(接続すると隠れる)。mode: idle / busy / error / lost / unsupported
+const WELCOME_TEXT = {
+  idle: ["キーボードをつないでください", "USBでつないで、「接続する」を押すと、いまのキーの割り当てを読み取ります。"],
+  busy: ["キーボードを選んでください", "画面に出る選択ウィンドウで、キーボードを選んで、「接続」を押してください。"],
+  error: ["つながりませんでした", "キーボードが選ばれなかったか、ほかのアプリが使っています。もう一度「接続する」を押してください。"],
+  lost: ["接続が切れました", "USBをつなぎ直して、もう一度「接続する」を押してください。"],
+  unsupported: ["このブラウザでは使えません", "tinykeemap はPC版の Chrome と Edge で使えます。"],
+};
+
+// 非対応のとき、PC に持っていけるように、このページの URL を見せる
+function pageUrl() {
+  return /^https?:$/.test(location.protocol) ? location.origin + location.pathname : location.href;
+}
+
+function setWelcome(mode, reason) {
+  const t = WELCOME_TEXT[mode];
+  const unsupported = mode === "unsupported";
+  els.welcomeTitle.textContent = t[0];
+  els.welcomeBody.textContent = t[1];
+  els.connect.hidden = unsupported;
+  els.connect.disabled = mode === "busy";
+  els.connect.textContent = mode === "busy" ? "接続中…" : "接続する";
+  els.welcomeError.hidden = !(mode === "error" || mode === "lost");
+  els.welcomeCable.hidden = mode !== "error";
+  els.welcomeReason.textContent = reason ? String(reason) : "";
+  els.welcomeUnsupported.hidden = !unsupported;
+  els.welcomeHelp.hidden = unsupported;
+  els.conn.hidden = unsupported;
+  if (unsupported) els.welcomeUrl.textContent = pageUrl();
+  else setStatus(mode === "busy" ? "busy" : "off", mode === "busy" ? "接続中…" : "未接続");
+  els.welcome.hidden = false;
+  document.body.classList.add("is-off");
+}
+
+function copyPageUrl() {
+  const done = (text) => {
+    els.btnCopyUrl.textContent = text;
+    setTimeout(() => { els.btnCopyUrl.textContent = "リンクをコピー"; }, 2000);
+  };
+  if (!navigator.clipboard) { done("コピーできません"); return; }
+  navigator.clipboard.writeText(pageUrl()).then(() => done("コピーしました"), () => done("コピーできません"));
+}
+
 function showError(message, isWarning) {
   els.error.textContent = message;
   els.error.className = "error" + (isWarning ? " warn" : "");
@@ -386,8 +440,10 @@ function log(kind, text) {
 function updateButtons() {
   const connected = transport !== null;
   const broken = connected && transport.syncState === "broken"; // 応答が途絶えた。接続し直すまで操作できない
-  els.connect.hidden = connected; // 接続中は、上の1行に出さない(切断は「…」メニュー)
-  els.connect.disabled = connected || busy;
+  if (connected) { // 接続したら、未接続の画面は隠す(切断は「…」メニュー)
+    els.welcome.hidden = true;
+    document.body.classList.remove("is-off");
+  }
   els.reload.disabled = !connected || busy || broken;
   els.disconnect.disabled = !connected;
   updateEditControls();
@@ -1449,12 +1505,12 @@ function onTransportClosed(err) {
   baseline = null;
   lateCapture = null;
   clearResults();
+  clearError();
   if (err) {
-    setStatus("err", "切断されました");
-    showError("接続が切れました: " + (err.message || err));
+    setWelcome("lost", err.message || err);
     log("bad", "! 切断: " + (err.message || err));
   } else {
-    setStatus("off", "未接続");
+    setWelcome("idle");
     log("dbg", "(切断しました)");
   }
   updateButtons();
@@ -1476,12 +1532,13 @@ function onTransportBroken() {
 
 async function connect() {
   clearError();
+  setWelcome("busy");
   let port;
   try {
     port = await navigator.serial.requestPort();
   } catch (e) {
-    if (e && e.name === "NotFoundError") return; // 選択ダイアログを閉じただけ
-    showError("ポートを選べませんでした: " + (e.message || e));
+    if (e && e.name === "NotFoundError") { setWelcome("idle"); return; } // 選択ダイアログを閉じただけ
+    setWelcome("error", e.message || e);
     return;
   }
 
@@ -1501,17 +1558,14 @@ async function connect() {
     await t.open();
   } catch (e) {
     busy = false;
-    setStatus("err", "接続失敗");
-    showError(
-      "ポートを開けませんでした: " + (e.message || e) +
-      "\n他のソフト(picocom など)が同じポートを使っていないか確認してください。"
-    );
+    setWelcome("error", e.message || e);
     updateButtons();
     return;
   }
 
   transport = t;
   currentPort = port;
+  updateButtons(); // 未接続の画面を隠す
   log("dbg", "(接続しました)");
   await loadAll();
 }
@@ -1658,12 +1712,8 @@ function initTopBar() {
 function init() {
   initTopBar();
   if (!("serial" in navigator)) {
-    els.connect.disabled = true;
-    setStatus("err", "このブラウザは非対応です");
-    showError(
-      "WebSerial に対応していません。Chrome または Edge で開いてください。\n" +
-      "(ファイルを直接開いて動かない場合は、フォルダで `python3 -m http.server` を実行し、http://localhost:8000/ を開いてください)"
-    );
+    els.btnCopyUrl.addEventListener("click", copyPageUrl);
+    setWelcome("unsupported");
     return;
   }
   window.addEventListener("resize", relayoutStage);
@@ -1729,7 +1779,8 @@ function init() {
       transport.close();
     }
   });
-  setStatus("off", "未接続");
+  els.btnCopyUrl.addEventListener("click", copyPageUrl);
+  setWelcome("idle");
   updateButtons();
 }
 
