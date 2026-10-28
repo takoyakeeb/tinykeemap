@@ -8,64 +8,140 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="top">
-    <h1>tinykeemap</h1>
-    <p class="lead">キーボードにUSBで接続して、キーマップを読み取り、変更して、保存します。</p>
-  </header>
-
-  <main>
-    <section class="panel" aria-labelledby="conn-title">
-      <h2 id="conn-title">接続</h2>
-      <div class="row">
-        <button id="btn-connect" type="button">接続する</button>
-        <button id="btn-reload" type="button" disabled>再読み込み</button>
-        <button id="btn-disconnect" type="button" disabled>切断する</button>
+  <!-- 上の1行: 接続の点、未保存の変更の数、読み直す、保存する、「…」メニュー -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1 class="brand">tinykeemap</h1>
+      <div class="conn">
+        <span id="status-dot" class="dot dot-off" aria-hidden="true"></span>
         <span id="status" class="status status-off">未接続</span>
       </div>
-      <div id="error" class="error" role="alert" hidden></div>
+      <div class="spacer"></div>
+      <span id="dirty-badge" class="dirty-badge" role="status"></span>
+      <a id="link-readme" class="topbar-link" href="https://github.com/takoyakeeb/tinykeemap/blob/main/README.md">README</a>
+      <button id="btn-load" class="btn-text" type="button" disabled title="キーボードに保存した内容を読み直します。未保存の変更は破棄されます">読み直す</button>
+      <button id="btn-save" class="btn-primary" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する</button>
+      <button id="btn-menu" class="btn-icon" type="button" aria-label="その他" aria-haspopup="menu" aria-expanded="false">···</button>
+
+      <div id="menu" class="popup menu" role="menu" hidden>
+        <button id="menu-reset" type="button" role="menuitem" disabled>初期のキーマップに戻す…</button>
+        <button id="menu-layout" type="button" role="menuitem" disabled title="KLE(keyboard-layout-editor.com)の JSON ファイルを選んで、キーの並びを変えます">配列を読み込む…</button>
+        <button id="menu-layout-clear" type="button" role="menuitem" hidden>読み込んだ配列を消す</button>
+        <button id="menu-direct" type="button" role="menuitem" aria-expanded="false" disabled title="keycode を名前や16進で入力します(開発者向け)">keycode を直接入力…</button>
+        <button id="menu-detail" type="button" role="menuitem" aria-expanded="false">デバイス情報・通信ログ</button>
+        <button id="menu-reload" type="button" role="menuitem" disabled title="キーボードから、いまの内容を読み込み直します(保存済みの内容を読む「読み直す」とは別です)">再読み込み</button>
+        <button id="menu-disconnect" type="button" role="menuitem" disabled>切断する</button>
+      </div>
+
+      <div id="reset-confirm" class="popup confirm" role="alertdialog" aria-labelledby="reset-confirm-title" hidden>
+        <div id="reset-confirm-title" class="confirm-title">初期のキーマップに戻しますか</div>
+        <p id="reset-confirm-text" class="confirm-text"></p>
+        <div class="confirm-actions">
+          <button id="reset-cancel" class="btn-text" type="button">やめる</button>
+          <button id="reset-ok" class="btn-primary" type="button">戻す</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <input id="layout-file" type="file" accept=".json,application/json" hidden>
+
+  <main>
+    <!-- 未接続・非対応ブラウザの画面(接続すると隠れる)。app.js が文言を入れる -->
+    <section id="welcome" class="welcome" aria-labelledby="welcome-title">
+      <h2 id="welcome-title" class="welcome-title">キーボードをつないでください</h2>
+      <p id="welcome-body" class="welcome-body">USBでつないで、「接続する」を押すと、いまのキーの割り当てを読み取ります。</p>
+      <div class="welcome-act">
+        <button id="btn-connect" class="btn-primary btn-big" type="button">接続する</button>
+      </div>
+      <div id="welcome-error" class="welcome-note" role="alert" hidden>
+        <span id="welcome-cable">USBケーブルは、データ通信できるものを使ってください(充電専用のケーブルでは、つながりません)。</span>
+        <span id="welcome-reason" class="welcome-reason"></span>
+      </div>
+      <div id="welcome-unsupported" class="welcome-unsupported" hidden>
+        <div class="wu-row"><span class="wu-key">おすすめ</span><span>Chrome、Edge(PC版)</span></div>
+        <div class="wu-row"><span class="wu-key">未検証</span><span>Firefox(151 以降)</span></div>
+        <div class="wu-row"><span class="wu-key">使えない</span><span>Safari、スマートフォンのブラウザ</span></div>
+        <div class="wu-url">
+          <span id="welcome-url" class="wu-addr"></span>
+          <button id="btn-copy-url" type="button">リンクをコピー</button>
+        </div>
+      </div>
+      <p id="welcome-help" class="welcome-help">うまくいかないときは、<a href="https://github.com/takoyakeeb/tinykeemap/blob/main/README.md">README</a> を見てください。</p>
     </section>
 
-    <section class="panel" id="info-panel" aria-labelledby="info-title" hidden>
-      <h2 id="info-title">デバイス情報</h2>
-      <dl id="info" class="info"></dl>
-    </section>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="save-msg" class="edit-msg" role="status" hidden></div>
 
     <section class="panel" id="keymap-panel" aria-labelledby="keymap-title" hidden>
-      <h2 id="keymap-title">キーマップ</h2>
-      <p class="hint">各マスの小さい数字は index、大きい文字は keycode です。マスをクリックすると、下の「キーの編集」で変更できます。
-        ● が付いたマスは、まだ保存していない変更です(接続したとき、または最後に保存・読み直しをしたときの内容との違い)。</p>
-      <div class="row save-bar">
-        <button id="btn-save" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する(SAVE)</button>
-        <button id="btn-load" type="button" disabled title="Flash に保存した内容を読み直します。未保存の変更は破棄されます">読み直す(LOAD)</button>
-        <button id="btn-reset" type="button" disabled title="初期キーマップに戻します。保存するまで Flash は変わりません">初期化(RESET)</button>
-        <span id="dirty-badge" class="dirty-badge" role="status"></span>
-      </div>
-      <div id="save-msg" class="edit-msg" role="status" hidden></div>
+      <h2 id="keymap-title" class="sr-only">キーマップ</h2>
+      <!-- レイヤーのタブ(絵の真上)。app.js が作る -->
+      <div id="layer-tabs" class="tabs" role="group" aria-label="レイヤー"><span class="tabs-label">レイヤー</span></div>
       <div id="keymap"></div>
     </section>
 
-    <section class="panel" id="edit-panel" aria-labelledby="edit-title" hidden>
-      <h2 id="edit-title">キーの編集</h2>
-      <p class="hint">上のマスを選び、割り当てる keycode を選んで「変更する」を押します。変更はすぐにキーボードの入力へ反映されますが、「保存する」を押すまでは保存されません(USBを抜き差しすると、保存済みの内容に戻ります)。</p>
-      <p class="edit-target">選択中: <strong id="edit-target">(なし)</strong></p>
+    <!-- 下のパネル(画面の下にくっつける)。中身は、段階4で作り直す -->
+    <section class="panel edit-dock" id="edit-panel" aria-labelledby="edit-title" hidden>
       <div class="edit-grid">
-        <div class="edit-pick">
-          <label for="kc-search">名前で絞り込み</label>
-          <input id="kc-search" type="search" placeholder="例: A, Enter, F5, KC_ESC" autocomplete="off" disabled>
-          <select id="kc-list" size="10" aria-label="keycode の一覧" disabled></select>
+        <div class="edit-card">
+          <div class="card-head">
+            <h2 id="edit-title" class="card-title">キーを選んでください</h2>
+            <button id="btn-deselect" class="card-close" type="button" aria-label="選択をやめる" hidden>×</button>
+          </div>
+          <div id="card-body" class="card-body" hidden>
+            <div id="card-cap" class="card-cap" aria-hidden="true"></div>
+            <p id="card-name" class="card-name"></p>
+          </div>
+          <div id="edit-msg" class="edit-msg" role="status" hidden></div>
+        </div>
+        <div class="edit-pick" id="edit-pick">
+          <div class="tabs kinds" role="group" aria-label="種類">
+            <button id="kind-key" class="tab active" type="button" aria-pressed="true">キー</button>
+            <button id="kind-layer" class="tab" type="button" aria-pressed="false">レイヤー切り替え</button>
+          </div>
+          <div id="pick-key">
+            <label for="kc-search">名前で探す</label>
+            <input id="kc-search" type="search" placeholder="例: A, Enter, F5, KC_ESC" autocomplete="off" disabled>
+            <div id="kc-cats" class="cats" role="group" aria-label="カテゴリ"></div>
+          </div>
+          <div id="kc-grid" class="kgrid" role="group" aria-label="キーの一覧"></div>
+          <div id="pick-layer" class="pick-layer" hidden>
+            <div id="lk-kinds" class="lkinds" role="group" aria-label="切り替えの種類"></div>
+            <div class="lk-label">切り替え先</div>
+            <div id="lk-targets" class="ltargets" role="group" aria-label="切り替え先のレイヤー"></div>
+          </div>
         </div>
         <div class="edit-value">
-          <label for="kc-hex">keycode(16進、または名前。例: 0x0004、KC_A、MO(1)、LSFT(KC_A))</label>
-          <input id="kc-hex" type="text" placeholder="0x0004" autocomplete="off" spellcheck="false" disabled>
-          <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
-          <button id="btn-set" type="button" disabled>変更する</button>
+          <fieldset id="mod-box" class="mods">
+            <legend>同時に押すキー</legend>
+            <label><input type="checkbox" data-bit="256" disabled> Ctrl</label>
+            <label><input type="checkbox" data-bit="512" disabled> Shift</label>
+            <label><input type="checkbox" data-bit="1024" disabled> Alt</label>
+            <label><input type="checkbox" data-bit="2048" disabled> GUI <span class="mod-note">(Mac は ⌘、Windows は ⊞)</span></label>
+          </fieldset>
+          <p id="mod-hint" class="hint mod-hint" hidden>右側の修飾キーが付いています。ここでは変えられません。</p>
+          <div class="after-label">変更後</div>
+          <div id="kc-after" class="kc-after" aria-live="polite">—</div>
+          <div class="row">
+            <button id="btn-set" type="button" disabled>変更する</button>
+            <button id="btn-revert" class="btn-text" type="button" hidden title="このキーを、読み込んだ値・保存した値に戻します">元に戻す</button>
+          </div>
+          <p class="hint save-note">「保存する」までは、USBを抜くと元に戻ります。</p>
         </div>
       </div>
-      <div id="edit-msg" class="edit-msg" role="status" hidden></div>
+      <!-- 「…」メニューの「keycode を直接入力…」で開く(開発者向け) -->
+      <div id="kc-direct" class="direct" hidden>
+        <label for="kc-hex">keycode(名前または16進。例: KC_A、MO(1)、LSFT(KC_A)、0x0004)</label>
+        <input id="kc-hex" type="text" placeholder="KC_A" autocomplete="off" spellcheck="false" disabled>
+        <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
+      </div>
     </section>
 
-    <section class="panel" aria-labelledby="log-title">
-      <h2 id="log-title">通信ログ</h2>
+    <!-- 「…」メニューの「デバイス情報・通信ログ」で開く -->
+    <section class="panel" id="detail" aria-label="デバイス情報・通信ログ" hidden>
+      <h2 id="info-title">デバイス情報</h2>
+      <dl id="info" class="info"></dl>
+      <h2 id="log-title" class="detail-sub">通信ログ</h2>
       <pre id="log" class="log" aria-live="off"></pre>
     </section>
   </main>
@@ -73,6 +149,7 @@
   <footer class="foot">MIT License</footer>
 
   <script src="keycodes.js"></script>
+  <script src="devices.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

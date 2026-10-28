@@ -291,25 +291,66 @@ function hex4(n) {
 
 const els = {
   connect: document.getElementById("btn-connect"),
-  reload: document.getElementById("btn-reload"),
-  disconnect: document.getElementById("btn-disconnect"),
+  welcome: document.getElementById("welcome"),
+  welcomeTitle: document.getElementById("welcome-title"),
+  welcomeBody: document.getElementById("welcome-body"),
+  welcomeError: document.getElementById("welcome-error"),
+  welcomeReason: document.getElementById("welcome-reason"),
+  welcomeCable: document.getElementById("welcome-cable"),
+  welcomeUnsupported: document.getElementById("welcome-unsupported"),
+  welcomeUrl: document.getElementById("welcome-url"),
+  welcomeHelp: document.getElementById("welcome-help"),
+  btnCopyUrl: document.getElementById("btn-copy-url"),
+  conn: document.querySelector(".conn"),
+  reload: document.getElementById("menu-reload"),
+  disconnect: document.getElementById("menu-disconnect"),
   status: document.getElementById("status"),
+  statusDot: document.getElementById("status-dot"),
   error: document.getElementById("error"),
-  infoPanel: document.getElementById("info-panel"),
+  detail: document.getElementById("detail"),
   info: document.getElementById("info"),
+  btnMenu: document.getElementById("btn-menu"),
+  menu: document.getElementById("menu"),
+  menuReset: document.getElementById("menu-reset"),
+  menuDetail: document.getElementById("menu-detail"),
+  menuDirect: document.getElementById("menu-direct"),
+  kcDirect: document.getElementById("kc-direct"),
+  menuLayout: document.getElementById("menu-layout"),
+  menuLayoutClear: document.getElementById("menu-layout-clear"),
+  layoutFile: document.getElementById("layout-file"),
+  resetConfirm: document.getElementById("reset-confirm"),
+  resetConfirmText: document.getElementById("reset-confirm-text"),
+  resetCancel: document.getElementById("reset-cancel"),
+  resetOk: document.getElementById("reset-ok"),
   keymapPanel: document.getElementById("keymap-panel"),
   keymap: document.getElementById("keymap"),
+  layerTabs: document.getElementById("layer-tabs"),
   editPanel: document.getElementById("edit-panel"),
-  editTarget: document.getElementById("edit-target"),
+  editTitle: document.getElementById("edit-title"),
+  btnDeselect: document.getElementById("btn-deselect"),
+  cardBody: document.getElementById("card-body"),
+  cardCap: document.getElementById("card-cap"),
+  cardName: document.getElementById("card-name"),
+  editPick: document.getElementById("edit-pick"),
+  kindKey: document.getElementById("kind-key"),
+  kindLayer: document.getElementById("kind-layer"),
+  pickKey: document.getElementById("pick-key"),
   kcSearch: document.getElementById("kc-search"),
-  kcList: document.getElementById("kc-list"),
+  kcCats: document.getElementById("kc-cats"),
+  kcGrid: document.getElementById("kc-grid"),
+  kcAfter: document.getElementById("kc-after"),
+  pickLayer: document.getElementById("pick-layer"),
+  lkKinds: document.getElementById("lk-kinds"),
+  lkTargets: document.getElementById("lk-targets"),
+  modBoxes: Array.from(document.querySelectorAll("#mod-box input[type=checkbox]")),
+  modHint: document.getElementById("mod-hint"),
   kcHex: document.getElementById("kc-hex"),
   kcPreview: document.getElementById("kc-preview"),
   btnSet: document.getElementById("btn-set"),
+  btnRevert: document.getElementById("btn-revert"),
   editMsg: document.getElementById("edit-msg"),
   btnSave: document.getElementById("btn-save"),
   btnLoad: document.getElementById("btn-load"),
-  btnReset: document.getElementById("btn-reset"),
   dirtyBadge: document.getElementById("dirty-badge"),
   saveMsg: document.getElementById("save-msg"),
   log: document.getElementById("log"),
@@ -330,6 +371,50 @@ let lateCapture = null;
 function setStatus(kind, text) {
   els.status.className = "status status-" + kind;
   els.status.textContent = text;
+  els.statusDot.className = "dot dot-" + kind;
+}
+
+// 未接続・非対応ブラウザの画面(接続すると隠れる)。mode: idle / busy / error / lost / unsupported
+const WELCOME_TEXT = {
+  idle: ["キーボードをつないでください", "USBでつないで、「接続する」を押すと、いまのキーの割り当てを読み取ります。"],
+  busy: ["キーボードを選んでください", "画面に出る選択ウィンドウで、キーボードを選んで、「接続」を押してください。"],
+  error: ["つながりませんでした", "キーボードが選ばれなかったか、ほかのアプリが使っています。もう一度「接続する」を押してください。"],
+  lost: ["接続が切れました", "USBをつなぎ直して、もう一度「接続する」を押してください。"],
+  unsupported: ["このブラウザでは使えません", "tinykeemap はPC版の Chrome と Edge で使えます。"],
+};
+
+// 非対応のとき、PC に持っていけるように、このページの URL を見せる
+function pageUrl() {
+  return /^https?:$/.test(location.protocol) ? location.origin + location.pathname : location.href;
+}
+
+function setWelcome(mode, reason) {
+  const t = WELCOME_TEXT[mode];
+  const unsupported = mode === "unsupported";
+  els.welcomeTitle.textContent = t[0];
+  els.welcomeBody.textContent = t[1];
+  els.connect.hidden = unsupported;
+  els.connect.disabled = mode === "busy";
+  els.connect.textContent = mode === "busy" ? "接続中…" : "接続する";
+  els.welcomeError.hidden = !(mode === "error" || mode === "lost");
+  els.welcomeCable.hidden = mode !== "error";
+  els.welcomeReason.textContent = reason ? String(reason) : "";
+  els.welcomeUnsupported.hidden = !unsupported;
+  els.welcomeHelp.hidden = unsupported;
+  els.conn.hidden = unsupported;
+  if (unsupported) els.welcomeUrl.textContent = pageUrl();
+  else setStatus(mode === "busy" ? "busy" : "off", mode === "busy" ? "接続中…" : "未接続");
+  els.welcome.hidden = false;
+  document.body.classList.add("is-off");
+}
+
+function copyPageUrl() {
+  const done = (text) => {
+    els.btnCopyUrl.textContent = text;
+    setTimeout(() => { els.btnCopyUrl.textContent = "リンクをコピー"; }, 2000);
+  };
+  if (!navigator.clipboard) { done("コピーできません"); return; }
+  navigator.clipboard.writeText(pageUrl()).then(() => done("コピーしました"), () => done("コピーできません"));
 }
 
 function showError(message, isWarning) {
@@ -355,7 +440,10 @@ function log(kind, text) {
 function updateButtons() {
   const connected = transport !== null;
   const broken = connected && transport.syncState === "broken"; // 応答が途絶えた。接続し直すまで操作できない
-  els.connect.disabled = connected || busy;
+  if (connected) { // 接続したら、未接続の画面は隠す(切断は「…」メニュー)
+    els.welcome.hidden = true;
+    document.body.classList.remove("is-off");
+  }
   els.reload.disabled = !connected || busy || broken;
   els.disconnect.disabled = !connected;
   updateEditControls();
@@ -370,28 +458,45 @@ function canOperate() {
 function updateSaveControls() {
   const usable = canOperate();
   els.btnSave.disabled = !usable;
+  els.menuLayout.disabled = !usable;
+  els.menuLayoutClear.hidden = !(model !== null && model.custom !== null);
+  els.menuLayoutClear.disabled = !usable;
   els.btnLoad.disabled = !usable;
-  els.btnReset.disabled = !usable;
+  els.menuReset.disabled = !usable;
+  els.menuDirect.disabled = !usable;
 }
 
 function updateEditControls() {
   const usable = canOperate();
-  els.kcSearch.disabled = !usable;
-  els.kcList.disabled = !usable;
+  els.editPick.querySelectorAll("button, input").forEach((el) => { el.disabled = !usable; });
+  if (pickKind === "layer") updateLayerPick(); // 切り替え先 L0 は、TO のときだけ選べる
   els.kcHex.disabled = !usable;
   els.btnSet.disabled = !(usable && model.selected !== null);
+  updateRevert();
+}
+
+// 「元に戻す」: 選んでいるキーが未保存のときだけ出す(戻す先は、読み込んだ値・保存した値)
+function canRevert() {
+  if (!model || !model.selected || !baselineFits(model.codes)) return false;
+  const { layer, index } = model.selected;
+  return model.codes[layer][index] !== baseline[layer][index];
+}
+
+function updateRevert() {
+  els.btnRevert.hidden = !canRevert();
+  els.btnRevert.disabled = !canOperate();
 }
 
 function clearResults() {
-  els.infoPanel.hidden = true;
+  closePopups();
   els.keymapPanel.hidden = true;
   els.editPanel.hidden = true;
   els.info.replaceChildren();
   els.keymap.replaceChildren();
+  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
   model = null;
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
-  populateKeycodeList(els.kcSearch.value);
-  els.editTarget.textContent = "(なし)";
+  renderPicker();
   els.kcHex.value = "";
   updatePreview();
   clearEditMessage();
@@ -434,7 +539,7 @@ async function doRequest(command, timeoutMs) {
   return parseResponse(line);
 }
 
-function renderInfo(info, rawInfo) {
+function renderInfo(info, rawInfo, layoutResult) {
   els.info.replaceChildren();
   const rows = [
     ["機種名 (name)", info.name],
@@ -443,6 +548,7 @@ function renderInfo(info, rawInfo) {
     ["キー数 (keys)", String(info.keys)],
     ["行 × 列 (rows × cols)", info.rows + " × " + info.cols],
     ["レイヤー数 (layers)", String(info.layers)],
+    ["機種定義 (配列)", describeLayout(layoutResult)],
   ];
   // 知らないキーも、将来の確認用にそのまま表示する
   const known = new Set(["name", "proto", "fw", "keys", "rows", "cols", "layers"]);
@@ -456,72 +562,158 @@ function renderInfo(info, rawInfo) {
     dd.textContent = value;
     els.info.append(dt, dd);
   }
-  els.infoPanel.hidden = false;
 }
 
 // マスの下に添える注釈(名前など)
 function capNote(code) {
-  if (code === 0x0000) return "何もしない";
+  if (code === 0x0000) return "無効";
   if (code === 0x0001) return "透過";
   const k = findKeycode(code);
   if (!k) return "(一覧にない値)";
   if (k.cap) return k.cap; // 修飾キー付きは「Shift+A」のように短く
-  return k.warn ? k.name + "(範囲外)" : k.name;
+  // レイヤー切り替えは、表示名が長いので、MO(1) のような名前を出す
+  if (k.group === "layer") return k.warn ? k.name + "(範囲外)" : k.name;
+  // ふつうのキーは、F11 や ← のような読みやすい表示名を出す(修飾キー付きと同じ表示にそろえる)
+  return k.label;
 }
 
-// マス1つの中身(index・keycode・注釈)を作り直す。最初の表示と、SET のあとの更新の両方で使う
+// ---- キーの絵(マスの大きさと並べ方) ----
+
+// 1u(キー1つぶん)の大きさ。機種の幅と画面の幅から、40〜80px の間で決める
+const UNIT_MIN = 40;
+const UNIT_MAX = 80;
+// いまの大きさと、それに合わせた表示の形(小さいときは、番号を隠し、1行にまとめる)
+const stage = { u: 0, pad: 2, two: true, showIdx: true, mainSize: 17 };
+
+function setStageMetrics(u) {
+  stage.u = u;
+  stage.pad = Math.max(2, Math.round(u * 0.045));
+  stage.two = u >= 56; // 2段(上に小さく修飾キー、下に大きくキー名)
+  stage.showIdx = u >= 64; // 左上の index
+  stage.mainSize = u >= 64 ? 17 : (u >= 50 ? 14 : 12);
+}
+
+function computeUnit() {
+  const w = els.keymap.clientWidth;
+  const lw = model && model.layout ? model.layout.width : 0;
+  if (!w || !lw) return UNIT_MAX;
+  return Math.max(UNIT_MIN, Math.min(UNIT_MAX, Math.floor(w / lw)));
+}
+
+function setStageSize(box) {
+  box.style.width = model.layout.width * stage.u + "px";
+  box.style.height = model.layout.height * stage.u + "px";
+}
+
+function setCapGeometry(cap, p) {
+  cap.style.left = p.x * stage.u + stage.pad + "px";
+  cap.style.top = p.y * stage.u + stage.pad + "px";
+  cap.style.width = p.w * stage.u - 2 * stage.pad + "px";
+  cap.style.height = p.h * stage.u - 2 * stage.pad + "px";
+}
+
+// 文字がマスの幅に収まる大きさ(最大 maxPx、最小 9px)。半角は 0.6 文字ぶん、それ以外は 1 文字ぶんとして数える
+function fitFontSize(text, maxPx, capWidth) {
+  let units = 0;
+  for (const ch of text) units += ch.charCodeAt(0) < 0x250 ? 0.6 : 1;
+  if (units === 0) return maxPx;
+  return Math.max(9, Math.min(maxPx, Math.floor((capWidth - 8) / units)));
+}
+
+// マス1つの中身(index・短い名前)を作り直す。最初の表示と、SET のあとの更新の両方で使う
+// 16進は出さない(マスにカーソルを載せたときの title と、読み上げの文にだけ入れる)
 function fillCap(cap, layerIndex, index, code) {
+  const face = capFace(code, !stage.two);
   cap.replaceChildren();
-  cap.classList.toggle("none", code === 0x0000);
-  cap.classList.toggle("trans", code === 0x0001);
-  const idx = document.createElement("span");
-  idx.className = "idx";
-  idx.textContent = String(index);
-  const c = document.createElement("span");
-  c.className = "code";
-  c.textContent = hex4(code);
-  const note = document.createElement("span");
-  note.className = "note";
-  note.textContent = capNote(code);
-  cap.append(idx, c, note);
-  cap.dataset.label = "レイヤー " + layerIndex + " キー " + index + ": " + hex4(code) + " " + capNote(code);
+  cap.classList.toggle("none", face.kind === "none");
+  cap.classList.toggle("trans", face.kind === "trans");
+  if (stage.showIdx) {
+    const idx = document.createElement("span");
+    idx.className = "idx";
+    idx.setAttribute("aria-hidden", "true");
+    idx.textContent = String(index);
+    cap.append(idx);
+  }
+  if (face.small !== "") {
+    const small = document.createElement("span");
+    small.className = "small";
+    small.textContent = face.small;
+    cap.append(small);
+  }
+  const main = document.createElement("span");
+  main.className = "main";
+  const p = model.layout.layout[index];
+  main.style.fontSize = fitFontSize(face.main, face.kind === "normal" ? stage.mainSize : 12, p.w * stage.u - 2 * stage.pad) + "px";
+  main.textContent = face.main;
+  cap.append(main);
+  cap.dataset.title = hex4(code) + "  " + capNote(code);
+  cap.title = cap.dataset.title;
+  cap.dataset.label = "レイヤー " + layerIndex + " キー " + index + ": " + capNote(code);
   cap.setAttribute("aria-label", cap.dataset.label);
 }
 
 function renderLayer(layerIndex, codes, info) {
-  // index = row * cols + col (protocol.md §2)。rows × cols が keys と合わないときは1行に並べる
-  const shapeOk = info.rows * info.cols === info.keys;
-  const cols = shapeOk ? info.cols : info.keys;
-
   const section = document.createElement("div");
   section.className = "layer";
-  const h = document.createElement("h3");
-  h.textContent = "レイヤー " + layerIndex;
-  section.appendChild(h);
+  section.hidden = layerIndex !== model.current; // 絵に出すのは、いま選んでいるレイヤーだけ
+  model.sections[layerIndex] = section;
 
-  const grid = document.createElement("div");
-  grid.className = "grid";
-  grid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(78px, 1fr))";
+  // 機種定義(resolveLayout の結果)の位置と幅で、マスを並べる。位置がない index(null)には、マスを作らない
+  const wrap = document.createElement("div");
+  wrap.className = "stage-wrap";
+  const box = document.createElement("div");
+  box.className = "stage";
+  setStageSize(box);
 
   model.caps[layerIndex] = [];
+  model.stages[layerIndex] = box;
   codes.forEach((code, index) => {
+    const p = model.layout.layout[index];
+    if (!p) {
+      model.caps[layerIndex].push(null);
+      return;
+    }
     const cap = document.createElement("button");
     cap.type = "button";
     cap.className = "cap";
     cap.setAttribute("aria-pressed", "false");
     cap.addEventListener("click", () => selectKey(layerIndex, index));
+    setCapGeometry(cap, p);
     fillCap(cap, layerIndex, index, code);
-    grid.appendChild(cap);
+    box.appendChild(cap);
     model.caps[layerIndex].push(cap);
   });
 
-  section.appendChild(grid);
+  wrap.appendChild(box);
+  section.appendChild(wrap);
   els.keymap.appendChild(section);
-  return shapeOk;
+}
+
+// 画面の幅が変わったとき、マスの大きさと表示の形を合わせ直す
+let relayoutQueued = false;
+function relayoutStage() {
+  if (!model || model.caps.length === 0 || relayoutQueued) return;
+  relayoutQueued = true;
+  requestAnimationFrame(() => {
+    relayoutQueued = false;
+    if (!model) return;
+    const u = computeUnit();
+    if (u === stage.u) return;
+    setStageMetrics(u);
+    model.caps.forEach((row, l) => {
+      setStageSize(model.stages[l]);
+      row.forEach((cap, i) => {
+        if (!cap) return;
+        setCapGeometry(cap, model.layout.layout[i]);
+        fillCap(cap, l, i, model.codes[l][i]);
+      });
+    });
+    refreshDirtyMarks();
+  });
 }
 
 // INFO → 全レイヤーの DUMP を順に読んで表示する
-async function loadAll() {
+async function loadAll(startLayer) {
   busy = true;
   updateButtons();
   clearError();
@@ -531,31 +723,45 @@ async function loadAll() {
     const rawInfoResp = await request("INFO");
     const rawInfo = parseInfoData(rawInfoResp.data);
     const info = normalizeInfo(rawInfo);
-    renderInfo(info, rawInfo);
+    // 機種定義(キーの位置と幅、既定のレイヤー名)を探して、マスの並びに使う
+    const custom = findCustomLayout(info.name);
+    const layoutResult = resolveLayout(info, findDeviceDef(info.name), custom);
+    renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
-    populateKeycodeList(els.kcSearch.value);
+    renderPicker();
 
     const warnings = [];
     if (info.proto !== 1) {
       warnings.push("このツールは proto=1 用です。デバイスは proto=" + info.proto + " なので、正しく表示できない可能性があります。");
     }
-    if (info.rows * info.cols !== info.keys) {
+    if (info.rows * info.cols !== info.keys && layoutResult.source === "grid") {
       warnings.push("rows × cols (" + info.rows * info.cols + ") が keys (" + info.keys + ") と一致しないため、1行に並べて表示します。");
     }
 
-    model = { info, codes: [], caps: [], selected: null };
+    warnings.push(...layoutResult.warnings);
+
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null };
     els.keymapPanel.hidden = false;
+    setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
       const resp = await request("DUMP " + layer);
       const codes = parseDumpData(resp.data, info.keys);
       model.codes[layer] = codes;
       renderLayer(layer, codes, info);
     }
+    buildTabs();
+    // 再読み込みや配列の読み込みでは、見ているレイヤーを保つ(接続したときは、レイヤー 0)
+    if (typeof startLayer === "number" && startLayer > 0 && startLayer < info.layers) {
+      model.current = startLayer;
+      model.sections.forEach((sec, l) => { sec.hidden = l !== startLayer; });
+      updateTabs();
+    }
     // 最初の読み込みでは、今の内容を「保存済み」とみなす。再読み込みでは、前の基準を保つ
     if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
     refreshDirtyMarks();
     els.editPanel.hidden = false;
+    renderPicker(); // レイヤー切り替えの欄に、レイヤー名(MAC・EDIT)を出すため、model を作ったあとにも作り直す
 
     setStatus("on", "接続中 (" + info.name + ")");
     if (warnings.length > 0) showError(warnings.join("\n"), true);
@@ -584,31 +790,245 @@ function clearEditMessage() {
   els.editMsg.textContent = "";
 }
 
-// keycode の一覧を作る(絞り込み文字に合うものだけ、グループごとに)
-function populateKeycodeList(filterText) {
-  const keep = els.kcList.value;
-  els.kcList.replaceChildren();
-  const hits = searchKeycodes(filterText);
-  for (const g of KEYCODE_GROUPS) {
-    const items = hits.filter((k) => k.group === g.id);
-    if (items.length === 0) continue;
-    const og = document.createElement("optgroup");
-    og.label = g.title;
-    for (const k of items) {
-      const o = document.createElement("option");
-      o.value = String(k.code);
-      o.textContent = keycodeHex(k.code) + "  " + k.name + "  " + k.label;
-      og.appendChild(o);
+// 選ぶ欄の状態(種類のタブと、カテゴリ)
+let pickKind = "key"; // "key" | "layer"
+let pickCat = "basic";
+
+// 選ぶ欄(種類のタブ、カテゴリ、キーのボタンの一覧)を作り直す
+//   名前の検索に文字があるときは、カテゴリに関係なく、当てはまるキーをすべて出す
+function renderPicker() {
+  const usable = canOperate();
+  const searching = pickKind === "key" && els.kcSearch.value.trim() !== "";
+  for (const [btn, kind] of [[els.kindKey, "key"], [els.kindLayer, "layer"]]) {
+    btn.classList.toggle("active", pickKind === kind);
+    btn.setAttribute("aria-pressed", pickKind === kind ? "true" : "false");
+  }
+  els.pickKey.hidden = pickKind !== "key";
+  els.pickLayer.hidden = pickKind !== "layer";
+  els.kcGrid.hidden = pickKind !== "key";
+  els.kcCats.replaceChildren();
+  for (const c of KEY_CATEGORIES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cat";
+    btn.dataset.cat = c.id;
+    btn.textContent = c.title;
+    const on = !searching && pickCat === c.id;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.disabled = !usable;
+    els.kcCats.appendChild(btn);
+  }
+  if (pickKind === "layer") {
+    buildLayerPick(usable);
+    markPicked();
+    return;
+  }
+  const list = searching ? searchKeycodes(els.kcSearch.value) : KEYCODES.filter((k) => keyCategory(k) === pickCat);
+  els.kcGrid.replaceChildren();
+  if (list.length === 0) {
+    const p = document.createElement("p");
+    p.className = "kgrid-empty";
+    p.textContent = "当てはまるキーがありません。";
+    els.kcGrid.appendChild(p);
+  }
+  for (const k of list) {
+    const face = capFace(k.code, false);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "kb";
+    btn.dataset.code = String(k.code);
+    btn.title = k.label + (k.warn ? "(" + k.warn + ")" : "");
+    btn.disabled = !usable;
+    if (face.small !== "") {
+      const small = document.createElement("span");
+      small.className = "small";
+      small.textContent = face.small;
+      btn.appendChild(small);
     }
-    els.kcList.appendChild(og);
+    const main = document.createElement("span");
+    main.className = "main";
+    main.textContent = face.main;
+    btn.appendChild(main);
+    els.kcGrid.appendChild(btn);
   }
-  if (hits.length === 0) {
-    const o = document.createElement("option");
-    o.disabled = true;
-    o.textContent = "(当てはまるものがありません)";
-    els.kcList.appendChild(o);
+  markPicked();
+}
+
+/* ---- レイヤー切り替え(MO・TG・TO と、切り替え先) ---- */
+
+// 種類のボタンの文言。MO(n) などの表記も、ボタンに残す(VIA などと名前をそろえるため)
+const LAYER_KIND_UI = {
+  MO: { title: "押している間だけ", desc: "指を離すと、元のレイヤーに戻ります" },
+  TG: { title: "押すたびに切り替え", desc: "もう一度押すと、元に戻ります" },
+  TO: { title: "そのレイヤーへ移る", desc: "そのレイヤーだけを有効にします。押している間の MO は残ります" },
+};
+let lkindDefault = "MO"; // keycode がレイヤー切り替えでないときに、切り替え先のボタンを押したときの種類
+let ltargetDefault = 1; // 同じく、種類のボタンを押したときの切り替え先
+
+// 種類(MO・TG・TO)と、切り替え先(L0〜)のボタンを作る。個数は、デバイスのレイヤー数(INFO の layers)に合わせる
+function buildLayerPick(usable) {
+  els.lkKinds.replaceChildren();
+  els.lkTargets.replaceChildren();
+  if (deviceLayers === 0) {
+    const p = document.createElement("p");
+    p.className = "kgrid-empty";
+    p.textContent = "接続すると、ここに出ます。";
+    els.lkKinds.appendChild(p);
+    return;
   }
-  if (keep !== "") els.kcList.value = keep; // 絞り込み後にも残っていれば、選択を保つ
+  for (const kind of LAYER_KEY_KINDS) {
+    const ui = LAYER_KIND_UI[kind.name];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lk";
+    btn.dataset.kind = kind.name;
+    btn.disabled = !usable;
+    const head = document.createElement("span");
+    head.className = "lk-head";
+    const title = document.createElement("span");
+    title.className = "lk-title";
+    title.textContent = ui.title;
+    const code = document.createElement("span");
+    code.className = "lk-code";
+    code.textContent = kind.name + "(n)";
+    head.append(title, code);
+    const desc = document.createElement("span");
+    desc.className = "lk-desc";
+    desc.textContent = ui.desc;
+    btn.append(head, desc);
+    els.lkKinds.appendChild(btn);
+  }
+  const names = model && model.layout ? model.layout.layerNames : [];
+  for (let n = 0; n < deviceLayers && n <= LAYER_KEY_MAX; n++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lt";
+    btn.dataset.n = String(n);
+    btn.disabled = !usable;
+    const num = document.createElement("span");
+    num.className = "lt-num";
+    num.textContent = "L" + n;
+    btn.appendChild(num);
+    if (names[n]) {
+      const name = document.createElement("span");
+      name.className = "lt-name";
+      name.textContent = names[n];
+      btn.appendChild(name);
+    }
+    els.lkTargets.appendChild(btn);
+  }
+}
+
+// 入力欄の keycode に合わせて、種類・切り替え先のボタンの印と、押せるかどうかを決める
+//   切り替え先 L0 は、TO のときだけ選べる(MO(0)・TG(0) は何もしない)
+function updateLayerPick() {
+  const p = parseKeycodeText(els.kcHex.value);
+  const lk = p.ok ? decodeLayerKey(p.code) : null;
+  const usable = canOperate();
+  const effectiveKind = lk ? lk.kind.name : lkindDefault;
+  els.lkKinds.querySelectorAll(".lk").forEach((b) => {
+    const on = lk !== null && b.dataset.kind === lk.kind.name;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  els.lkTargets.querySelectorAll(".lt").forEach((b) => {
+    const n = Number(b.dataset.n);
+    const on = lk !== null && lk.n === n;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.disabled = !usable || (n === 0 && effectiveKind !== "TO");
+  });
+}
+
+// 種類のボタン: 切り替え先は、いまの値を引き継ぐ(L0 は TO 以外で選べないので、そのときは L1)
+function onLayerKindClick(name) {
+  const kind = LAYER_KEY_KINDS.find((x) => x.name === name);
+  const p = parseKeycodeText(els.kcHex.value);
+  const cur = p.ok ? decodeLayerKey(p.code) : null;
+  let n = cur ? cur.n : ltargetDefault;
+  if (n === 0 && name !== "TO") n = Math.min(1, deviceLayers - 1);
+  if (n >= deviceLayers) n = deviceLayers - 1;
+  lkindDefault = name;
+  ltargetDefault = n;
+  els.kcHex.value = keycodeHex(kind.base + n);
+  updatePreview();
+}
+
+// 切り替え先のボタン: 種類は、いまの値を引き継ぐ(レイヤー切り替えでなければ、前に選んだ種類。はじめは MO)
+function onLayerTargetClick(n) {
+  const p = parseKeycodeText(els.kcHex.value);
+  const cur = p.ok ? decodeLayerKey(p.code) : null;
+  const kind = cur ? cur.kind : LAYER_KEY_KINDS.find((x) => x.name === lkindDefault);
+  lkindDefault = kind.name;
+  ltargetDefault = n;
+  els.kcHex.value = keycodeHex(kind.base + n);
+  updatePreview();
+}
+
+// 入力欄の keycode と同じボタンに、印を付ける
+//   修飾キー付き(Ctrl+↓ など)のときは、中のキー(↓)のボタンに印を付ける。修飾キーのチェックボックスも、ここで合わせる
+function markPicked() {
+  const p = parseKeycodeText(els.kcHex.value);
+  const ms = p.ok ? modState(p.code) : null;
+  const code = p.ok ? (ms ? ms.baseCode : p.code) : null;
+  els.kcGrid.querySelectorAll(".kb").forEach((b) => {
+    const on = code !== null && Number(b.dataset.code) === code;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  updateModBoxes(ms);
+  if (pickKind === "layer") updateLayerPick();
+}
+
+/* ---- 修飾キーのチェックボックス(Ctrl・Shift・Alt・GUI) ---- */
+
+// 値を、{ baseCode, bits, isRight } に分ける。修飾キーを付けられない値(レイヤー切り替え、修飾キー単体、
+// 何もしない・透過、一覧にない値など)は null。bits は、付いている修飾キーのビット(Ctrl 0x0100 … GUI 0x0800)
+function modState(code) {
+  const m = splitModified(code);
+  if (m) return { baseCode: m.baseCode, bits: m.mods.reduce((a, x) => a | x.bit, 0), isRight: m.isRight };
+  if (code >= BASIC_KEY_MIN && code <= BASIC_KEY_MAX && KEYCODE_BY_CODE.has(code)) {
+    return { baseCode: code, bits: 0, isRight: false };
+  }
+  return null;
+}
+
+// チェックボックスを、入力欄の keycode に合わせる。付けられるのは、基本キーだけ。
+// 右側の修飾キー付き(RSFT(KC_A) など)は、チェックの状態だけ見せて、触れなくする(直接入力で変える)
+function updateModBoxes(ms) {
+  const usable = canOperate();
+  const editable = usable && ms !== null && !ms.isRight;
+  for (const box of els.modBoxes) {
+    box.checked = ms !== null && (ms.bits & Number(box.dataset.bit)) !== 0;
+    box.disabled = !editable;
+  }
+  els.modHint.hidden = !(ms !== null && ms.isRight);
+}
+
+// チェックボックスを押したとき: 入力欄の keycode に、修飾キーを付け外しする(左側のみ)
+function onModToggle() {
+  const p = parseKeycodeText(els.kcHex.value);
+  const ms = p.ok ? modState(p.code) : null;
+  if (ms === null || ms.isRight) return;
+  let bits = 0;
+  for (const box of els.modBoxes) if (box.checked) bits |= Number(box.dataset.bit);
+  els.kcHex.value = keycodeHex(ms.baseCode | bits);
+  updatePreview();
+}
+
+// 選んだマスの keycode に合わせて、種類のタブとカテゴリを切り替える(名前の検索は空にする)
+function syncPickerTo(code) {
+  els.kcSearch.value = "";
+  if (decodeLayerKey(code)) {
+    pickKind = "layer";
+  } else {
+    pickKind = "key";
+    let k = KEYCODE_BY_CODE.get(code);
+    if (!k && code >= 0x0100 && code <= 0x1fff) k = KEYCODE_BY_CODE.get(code & 0x00ff); // 修飾キー付きは、中のキーのカテゴリ
+    if (k) pickCat = keyCategory(k);
+  }
+  renderPicker();
 }
 
 // 入力欄の内容を読み取って、下に「→ 0x0004 KC_A(A)」のように見せる
@@ -617,34 +1037,139 @@ function updatePreview() {
   els.kcPreview.className = "kc-preview";
   if (text.trim() === "") {
     els.kcPreview.textContent = "";
+    els.kcAfter.textContent = "—";
+    markPicked();
     return;
   }
   const p = parseKeycodeText(text);
   if (!p.ok) {
     els.kcPreview.textContent = p.reason;
     els.kcPreview.classList.add("bad");
+    els.kcAfter.textContent = "—";
+    markPicked();
     return;
   }
   const k = findKeycode(p.code);
   els.kcPreview.textContent = "→ " + keycodeHex(p.code) + (k
     ? "  " + k.name + "(" + k.label + ")" + (k.warn ? "  ⚠ " + k.warn : "")
     : "  一覧にない値です。デバイスが対応していなければ、エラーになります");
-  if (k) els.kcList.value = String(p.code);
-  else els.kcList.selectedIndex = -1;
+  els.kcAfter.textContent = k ? k.label : "一覧にない値 " + keycodeHex(p.code);
+  markPicked();
+}
+
+/* ---- レイヤーのタブ ---- */
+
+function buildTabs() {
+  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
+  model.tabs = model.codes.map((_, l) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tab";
+    const num = document.createElement("span");
+    num.className = "tab-num";
+    num.textContent = String(l);
+    const name = document.createElement("span");
+    name.className = "tab-name";
+    const dot = document.createElement("span");
+    dot.className = "tab-dot";
+    dot.setAttribute("role", "img");
+    dot.setAttribute("aria-label", "未保存の変更あり");
+    btn.append(num, name, dot);
+    btn.addEventListener("click", () => setCurrentLayer(l));
+    els.layerTabs.appendChild(btn);
+    return { btn, name, dot };
+  });
+  updateTabs();
+}
+
+// 名前と「空」と ● を更新する。名前は機種定義の既定の名前。名前がなくて、中身がすべて「透過」なら「空」
+function updateTabs() {
+  if (!model || !model.tabs) return;
+  const fit = baselineFits(model.codes);
+  model.tabs.forEach((t, l) => {
+    const codes = model.codes[l];
+    const empty = codes.every((c) => c === 0x0001);
+    const label = model.layout.layerNames[l] || (empty ? "空" : "");
+    const changed = fit && codes.some((c, i) => c !== baseline[l][i]);
+    const active = l === model.current;
+    t.name.textContent = label;
+    t.dot.hidden = !changed;
+    t.btn.classList.toggle("active", active);
+    t.btn.setAttribute("aria-pressed", active ? "true" : "false");
+    t.btn.setAttribute("aria-label", "レイヤー " + l + (label ? " " + label : "") + (changed ? "(未保存の変更あり)" : ""));
+  });
+}
+
+// 選んでいるキーを、選んでいない状態に戻す(レイヤーを替えるときに使う)
+function deselectKey() {
+  if (!model) return;
+  model.selected = null;
+  model.caps.forEach((row) => row.forEach((cap) => {
+    if (!cap) return;
+    cap.classList.remove("selected", "set-failed");
+    cap.setAttribute("aria-pressed", "false");
+  }));
+  els.kcHex.value = "";
+  updateCard();
+  updatePreview();
+  clearEditMessage();
+  updateEditControls();
+}
+
+// 左のカード(選んだキー)を、いまの選びに合わせる
+function updateCard() {
+  const sel = model ? model.selected : null;
+  els.cardBody.hidden = sel === null;
+  els.btnDeselect.hidden = sel === null;
+  els.editTitle.textContent = sel === null ? "キーを選んでください" : "キー " + sel.index;
+  if (sel === null) return;
+  const code = model.codes[sel.layer][sel.index];
+  // 絵(マスと同じ2段。小さいときの1行にはしない)
+  const face = capFace(code, false);
+  els.cardCap.replaceChildren();
+  els.cardCap.classList.toggle("none", face.kind === "none");
+  els.cardCap.classList.toggle("trans", face.kind === "trans");
+  if (face.small !== "") {
+    const small = document.createElement("span");
+    small.className = "small";
+    small.textContent = face.small;
+    els.cardCap.append(small);
+  }
+  const main = document.createElement("span");
+  main.className = "main";
+  main.textContent = face.main;
+  els.cardCap.append(main);
+  // 名前(16進は出さない。一覧にない値だけ16進)
+  const k = findKeycode(code);
+  els.cardName.textContent = k ? k.label : "一覧にない値 " + keycodeHex(code);
+}
+
+function setCurrentLayer(layer) {
+  if (!model || layer === model.current) return;
+  deselectKey(); // 別のレイヤーのキーを選んだままにしない
+  model.current = layer;
+  model.sections.forEach((sec, l) => { sec.hidden = l !== layer; });
+  updateTabs();
 }
 
 // マスをクリックして選ぶ
 function selectKey(layer, index) {
   if (!model || busy || transport === null) return;
+  if (model.selected && model.selected.layer === layer && model.selected.index === index) {
+    deselectKey(); // 選んでいるマスをもう一度押すと、選びを外す
+    return;
+  }
   model.selected = { layer, index };
   model.caps.forEach((row, l) => row.forEach((cap, i) => {
+    if (!cap) return;
     const on = l === layer && i === index;
     cap.classList.toggle("selected", on);
     cap.classList.remove("set-failed");
     cap.setAttribute("aria-pressed", on ? "true" : "false");
   }));
-  els.editTarget.textContent = "レイヤー " + layer + " / キー " + index;
   els.kcHex.value = hex4(model.codes[layer][index]);
+  syncPickerTo(model.codes[layer][index]);
+  updateCard();
   updatePreview();
   clearEditMessage();
   updateEditControls();
@@ -656,13 +1181,29 @@ async function readKey(layer, index) {
   return parseDumpData(resp.data, 1)[0];
 }
 
-function keyLabel(code) {
+// メッセージに出す名前(16進は出さない。一覧にない値だけ16進)
+function keyName(code) {
   const k = findKeycode(code);
-  return keycodeHex(code) + (k ? "(" + k.name + ")" : "");
+  return k ? k.label : "一覧にない値 " + keycodeHex(code);
 }
 
 // 選んだマスに、入力欄の keycode を SET で送る(RAMだけ。Flash は変わらない)
 async function applyEdit() {
+  await doEdit(false);
+}
+
+// 「元に戻す」: 選んでいるキーを、読み込んだ値・保存した値に戻す(SET を送る。Flash は変わらない)
+async function revertKey() {
+  if (!canRevert() || busy || transport === null) return;
+  const { layer, index } = model.selected;
+  const code = baseline[layer][index];
+  els.kcHex.value = hex4(code);
+  syncPickerTo(code);
+  updatePreview();
+  await doEdit(true);
+}
+
+async function doEdit(isRevert) {
   if (!model || !model.selected || busy || transport === null) return;
   const { layer, index } = model.selected;
   const where = "レイヤー " + layer + " / キー " + index;
@@ -675,7 +1216,7 @@ async function applyEdit() {
   }
   const code = parsed.code;
   if (code === model.codes[layer][index]) {
-    showEditMessage("info", where + " は、すでに " + keyLabel(code) + " です(何も送っていません)。");
+    showEditMessage("info", where + " は、すでに " + keyName(code) + " です。");
     return;
   }
 
@@ -689,7 +1230,7 @@ async function applyEdit() {
     model.codes[layer][index] = code;
     fillCap(cap, layer, index, code);
     refreshDirtyMarks();
-    showEditMessage("ok", where + " を " + keyLabel(code) + " に変更しました。まだ保存していません(「保存する」を押すまで、USBを抜き差しすると元に戻ります)。");
+    showEditMessage("ok", isRevert ? where + " を元に戻しました。" : where + " を " + keyName(code) + " に変更しました。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
     await handleSetError(e, layer, index, code, cap);
@@ -705,17 +1246,17 @@ async function handleSetError(e, layer, index, code, cap) {
     cap.classList.add("set-failed");
     const detail = "ERR " + e.code + (e.message ? " " + e.message : "");
     if (e.code === "BADARG") {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスが " + keycodeHex(code) + " に対応していません(" + detail + ")。キーマップは変わっていません。");
+      showEditMessage("fail", where + " は変更できませんでした。デバイスが " + keycodeHex(code) + " に対応していません。");
     } else if (e.code === "RANGE") {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスが、レイヤーまたはキー番号を範囲外だと言っています(" + detail + ")。ツールとデバイスの設定が食い違っているので、「再読み込み」で読み直してください。");
+      showEditMessage("fail", where + " は変更できませんでした。範囲外です。「…」メニューの「再読み込み」を試してください。");
     } else {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスがエラーを返しました(" + detail + ")。");
+      showEditMessage("fail", where + " は変更できませんでした。(" + detail + ")");
     }
     return;
   }
   if (e instanceof TimeoutError) {
     // 変更が届いたかどうか分からない。遅れた応答が届くのを待ってから、そのキーだけ読み直す
-    showEditMessage("info", where + ": 応答が時間内に来ませんでした。変更されたか分からないので、遅れた応答を待って、値を読み直します…");
+    showEditMessage("info", where + ": 応答がありません。値を読み直します…");
     try {
       const actual = await readKey(layer, index);
       if (transport === null) return;
@@ -723,10 +1264,10 @@ async function handleSetError(e, layer, index, code, cap) {
       fillCap(cap, layer, index, actual);
       refreshDirtyMarks();
       if (actual === code) {
-        showEditMessage("ok", where + ": 応答は遅れましたが、" + keyLabel(actual) + " に変更されていました。まだ保存していません(「保存する」を押すまで、USBを抜き差しすると元に戻ります)。");
+        showEditMessage("ok", where + " を " + keyName(actual) + " に変更しました。");
       } else {
         cap.classList.add("set-failed");
-        showEditMessage("fail", where + ": 変更は反映されていませんでした。今の値は " + keyLabel(actual) + " です。");
+        showEditMessage("fail", where + ": 変更されていませんでした。今の値は " + keyName(actual) + " です。");
       }
     } catch (e2) {
       if (transport === null) return;
@@ -763,21 +1304,22 @@ function changedCount() {
 
 // 変更したマスの印(●)と、「未保存の変更: N キー」の表示を更新する
 function refreshDirtyMarks() {
+  updateTabs();
+  updateCard();
+  updateRevert();
   if (!model || !baselineFits(model.codes)) {
     els.dirtyBadge.textContent = "";
-    els.dirtyBadge.className = "dirty-badge";
-    els.btnSave.classList.remove("dirty");
     return;
   }
   const n = changedCount();
   model.caps.forEach((row, l) => row.forEach((cap, i) => {
+    if (!cap) return;
     const changed = model.codes[l][i] !== baseline[l][i];
     cap.classList.toggle("changed", changed);
+    cap.title = (cap.dataset.title || "") + (changed ? "  ・未保存の変更" : "");
     cap.setAttribute("aria-label", (cap.dataset.label || "") + (changed ? "(未保存の変更)" : ""));
   }));
-  els.dirtyBadge.textContent = n > 0 ? "未保存の変更: " + n + " キー" : "変更なし(保存済みと同じ)";
-  els.dirtyBadge.className = "dirty-badge " + (n > 0 ? "dirty" : "clean");
-  els.btnSave.classList.toggle("dirty", n > 0);
+  els.dirtyBadge.textContent = n > 0 ? "● 未保存の変更 " + n : "";
 }
 
 function showSaveMessage(kind, text) {
@@ -805,8 +1347,10 @@ async function readAllCodes() {
 function applyCodes(codes) {
   model.codes = codes;
   codes.forEach((row, l) => row.forEach((code, i) => {
-    fillCap(model.caps[l][i], l, i, code);
-    model.caps[l][i].classList.remove("set-failed");
+    const cap = model.caps[l][i];
+    if (!cap) return;
+    fillCap(cap, l, i, code);
+    cap.classList.remove("set-failed");
   }));
   if (model.selected) {
     els.kcHex.value = hex4(codes[model.selected.layer][model.selected.index]);
@@ -860,11 +1404,11 @@ function showSaveError(cmd, e) {
     }
   } else if (e instanceof SyncBrokenError) {
     msg = cmd === "SAVE"
-      ? "保存できたかどうか分かりません。デバイスから応答がありません。「切断する」で接続し直して、キーマップを確認し、必要ならもう一度保存してください。"
-      : name + "の結果が分かりません。デバイスから応答がありません。「切断する」で接続し直してください。";
+      ? "保存できたかどうか分かりません。デバイスから応答がありません。「…」メニューの「切断する」で接続し直して、キーマップを確認し、必要ならもう一度保存してください。"
+      : name + "の結果が分かりません。デバイスから応答がありません。「…」メニューの「切断する」で接続し直してください。";
   } else {
     msg = name + "に失敗しました。" + describeError(e) +
-      (cmd === "SAVE" ? "" : "\nキーボードの今の内容は「再読み込み」で確認できます。");
+      (cmd === "SAVE" ? "" : "\nキーボードの今の内容は「…」メニューの「再読み込み」で確認できます。");
   }
   showSaveMessage("fail", msg);
 }
@@ -920,8 +1464,6 @@ async function doLoad() {
 // 初期キーマップに戻す(キーボードの RAM だけ。Flash は「保存する」を押すまで変わらない)
 async function doReset() {
   if (!canOperate()) return;
-  const n = changedCount();
-  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n初期キーマップに戻すと、これらの変更は破棄されます(Flash は「保存する」を押すまで変わりません)。続けますか?")) return;
   busy = true;
   updateButtons();
   clearSaveMessage();
@@ -931,7 +1473,7 @@ async function doReset() {
     const codes = await readAllCodes();
     applyCodes(codes);
     showSaveMessage("ok", "初期キーマップに戻しました。まだ保存していません。" +
-      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す(LOAD)」を押してください。" : ""));
+      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す」を押してください。" : ""));
   } catch (e) {
     if (transport === null) return;
     showSaveError("RESET", e);
@@ -948,10 +1490,10 @@ function describeError(e) {
   }
   if (e instanceof SyncBrokenError) {
     return "デバイスから応答がありません(遅れて届く応答も約 " + LATE_GRACE_MS / 1000 + " 秒待ちましたが、来ませんでした)。\n" +
-      "「切断する」を押して、もう一度接続してください。";
+      "「…」メニューの「切断する」を押して、もう一度接続してください。";
   }
   if (e instanceof TimeoutError) {
-    return e.message + "\n遅れて届く応答を最大約 " + LATE_GRACE_MS / 1000 + " 秒待ちます。そのあとで「再読み込み」を押してください。\n" +
+    return e.message + "\n遅れて届く応答を最大約 " + LATE_GRACE_MS / 1000 + " 秒待ちます。そのあとで「…」メニューの「再読み込み」を押してください。\n" +
       "何度も続く場合は、デバイスのファームが USBシリアルのコマンドに対応しているか、debug 出力が有効になっていないか確認してください。";
   }
   return e.message || String(e);
@@ -963,12 +1505,12 @@ function onTransportClosed(err) {
   baseline = null;
   lateCapture = null;
   clearResults();
+  clearError();
   if (err) {
-    setStatus("err", "切断されました");
-    showError("接続が切れました: " + (err.message || err));
+    setWelcome("lost", err.message || err);
     log("bad", "! 切断: " + (err.message || err));
   } else {
-    setStatus("off", "未接続");
+    setWelcome("idle");
     log("dbg", "(切断しました)");
   }
   updateButtons();
@@ -990,12 +1532,13 @@ function onTransportBroken() {
 
 async function connect() {
   clearError();
+  setWelcome("busy");
   let port;
   try {
     port = await navigator.serial.requestPort();
   } catch (e) {
-    if (e && e.name === "NotFoundError") return; // 選択ダイアログを閉じただけ
-    showError("ポートを選べませんでした: " + (e.message || e));
+    if (e && e.name === "NotFoundError") { setWelcome("idle"); return; } // 選択ダイアログを閉じただけ
+    setWelcome("error", e.message || e);
     return;
   }
 
@@ -1015,17 +1558,14 @@ async function connect() {
     await t.open();
   } catch (e) {
     busy = false;
-    setStatus("err", "接続失敗");
-    showError(
-      "ポートを開けませんでした: " + (e.message || e) +
-      "\n他のソフト(picocom など)が同じポートを使っていないか確認してください。"
-    );
+    setWelcome("error", e.message || e);
     updateButtons();
     return;
   }
 
   transport = t;
   currentPort = port;
+  updateButtons(); // 未接続の画面を隠す
   log("dbg", "(接続しました)");
   await loadAll();
 }
@@ -1037,31 +1577,182 @@ async function disconnect() {
   await transport.close();
 }
 
+/* ---- 配列を読み込む(KLE の JSON ファイル) ---- */
+
+const LAYOUT_FILE_MAX = 1024 * 1024; // 1MB まで
+
+// 「…」メニューの「配列を読み込む…」: ファイルを選ぶ窓を開く
+function askLayoutFile() {
+  if (!canOperate()) return;
+  els.layoutFile.value = ""; // 同じファイルをもう一度選んでも、change が出るように
+  els.layoutFile.click();
+}
+
+// 選んだファイルを読んで、このデバイスに合えば使う(合わなければ、何も変えない)
+async function onLayoutFileChosen() {
+  const file = els.layoutFile.files && els.layoutFile.files[0];
+  if (!file || !canOperate()) return;
+  clearError();
+  const info = model.info;
+  let kle;
+  try {
+    if (file.size > LAYOUT_FILE_MAX) throw new Error("ファイルが大きすぎます(1MB まで)");
+    kle = JSON.parse(await file.text());
+  } catch (e) {
+    showError("配列を読み込めませんでした(" + file.name + "): " + (e instanceof SyntaxError ? "JSON として読めません" : e.message));
+    return;
+  }
+  const checked = checkKle(kle, info);
+  if (!checked.ok) {
+    showError("配列を使えませんでした(" + file.name + "): " + checked.reason);
+    return;
+  }
+  const { stored } = saveCustomLayout(info.name, kle, file.name);
+  await loadAll(model ? model.current : 0); // 並びを作り直す(キーボードの内容と、未保存の変更はそのまま)
+  if (model === null) return; // 読み込みに失敗したときは、そちらのエラーを出したまま
+  if (stored) {
+    showSaveMessage("ok", "配列を読み込みました。次回の接続からも使います。");
+  } else {
+    showSaveMessage("info", "配列を読み込みました。このページを閉じるまで使えます。\n(localStorageへ保存ができませんでした。次回開く時はもう一度配列を読み込んでください。ブラウザの設定を確認してください。)");
+  }
+}
+
+// 「読み込んだ配列を消す」
+async function clearCustomLayout() {
+  if (!canOperate() || model.custom === null) return;
+  removeCustomLayout(model.info.name);
+  await loadAll(model ? model.current : 0);
+  if (model !== null) showSaveMessage("ok", "読み込んだ配列を消しました。");
+}
+
+/* ---- 上の1行: 「…」メニューと、確認の小窓 ---- */
+
+let detailOpen = false;
+
+function setMenuOpen(open) {
+  els.menu.hidden = !open;
+  els.btnMenu.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+// メニューと確認の小窓を、どちらも閉じる
+function closePopups() {
+  setMenuOpen(false);
+  els.resetConfirm.hidden = true;
+}
+
+// 「デバイス情報・通信ログ」を開く・閉じる
+function setDetailOpen(open) {
+  detailOpen = open;
+  els.detail.hidden = !open;
+  els.menuDetail.setAttribute("aria-expanded", open ? "true" : "false");
+  els.menuDetail.textContent = open ? "デバイス情報・通信ログを閉じる" : "デバイス情報・通信ログ";
+  if (open) els.detail.scrollIntoView({ block: "start" });
+}
+
+// 「keycode を直接入力…」: パネルの下に、keycode の入力欄を開く・閉じる
+function setDirectOpen(open) {
+  els.kcDirect.hidden = !open;
+  els.menuDirect.setAttribute("aria-expanded", open ? "true" : "false");
+  els.menuDirect.textContent = open ? "keycode の直接入力を閉じる" : "keycode を直接入力…";
+  if (open) {
+    els.kcHex.focus();
+    els.kcDirect.scrollIntoView({ block: "nearest" });
+  }
+}
+
+// 「初期のキーマップに戻す…」: 確認の小窓を出す(RESET を送るのは「戻す」を押したとき)
+function askReset() {
+  if (!canOperate()) return;
+  const n = changedCount();
+  els.resetConfirmText.textContent = "「保存する」を押すまでは、キーボードの保存内容は変わりません。" +
+    (n > 0 ? "\n未保存の変更 " + n + " キーは、破棄されます。" : "");
+  els.resetConfirm.hidden = false;
+  els.resetCancel.focus();
+}
+
+function initTopBar() {
+  els.btnMenu.addEventListener("click", () => {
+    const wasOpen = !els.menu.hidden;
+    closePopups();
+    setMenuOpen(!wasOpen);
+  });
+  els.menu.addEventListener("click", (ev) => {
+    if (ev.target.closest("button")) setMenuOpen(false); // 項目を押したら、メニューは閉じる
+  });
+  els.menuReset.addEventListener("click", askReset);
+  els.menuDetail.addEventListener("click", () => setDetailOpen(!detailOpen));
+  els.menuDirect.addEventListener("click", () => setDirectOpen(els.kcDirect.hidden));
+  els.menuLayout.addEventListener("click", askLayoutFile);
+  els.menuLayoutClear.addEventListener("click", clearCustomLayout);
+  els.layoutFile.addEventListener("change", onLayoutFileChosen);
+  els.resetCancel.addEventListener("click", () => {
+    els.resetConfirm.hidden = true;
+    els.btnMenu.focus();
+  });
+  els.resetOk.addEventListener("click", () => {
+    els.resetConfirm.hidden = true;
+    doReset();
+  });
+  // 外側を押す、または Esc で閉じる
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest("#menu, #reset-confirm, #btn-menu")) closePopups();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && (!els.menu.hidden || !els.resetConfirm.hidden)) {
+      closePopups();
+      els.btnMenu.focus();
+    }
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* 起動                                                                 */
 /* ------------------------------------------------------------------ */
 
 function init() {
+  initTopBar();
   if (!("serial" in navigator)) {
-    els.connect.disabled = true;
-    setStatus("err", "このブラウザは非対応です");
-    showError(
-      "WebSerial に対応していません。Chrome または Edge で開いてください。\n" +
-      "(ファイルを直接開いて動かない場合は、フォルダで `python3 -m http.server` を実行し、http://localhost:8000/ を開いてください)"
-    );
+    els.btnCopyUrl.addEventListener("click", copyPageUrl);
+    setWelcome("unsupported");
     return;
   }
+  window.addEventListener("resize", relayoutStage);
   els.connect.addEventListener("click", connect);
-  els.reload.addEventListener("click", loadAll);
+  els.reload.addEventListener("click", () => loadAll(model ? model.current : 0));
   els.disconnect.addEventListener("click", disconnect);
   // 編集欄
-  populateKeycodeList("");
-  els.kcSearch.addEventListener("input", () => populateKeycodeList(els.kcSearch.value));
-  els.kcList.addEventListener("change", () => {
-    if (els.kcList.value === "") return;
-    els.kcHex.value = keycodeHex(Number(els.kcList.value));
+  renderPicker();
+  els.kcSearch.addEventListener("input", renderPicker);
+  els.kindKey.addEventListener("click", () => { pickKind = "key"; renderPicker(); });
+  els.kindLayer.addEventListener("click", () => { pickKind = "layer"; renderPicker(); });
+  els.kcCats.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".cat");
+    if (!b || b.disabled) return;
+    pickCat = b.dataset.cat;
+    els.kcSearch.value = "";
+    renderPicker();
+  });
+  els.kcGrid.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".kb");
+    if (!b || b.disabled) return;
+    // 修飾キーのチェックが付いていて、選んだのが基本キーなら、そのチェックを引き継ぐ(Shift を付けたまま、A → B と選べる)
+    const cur = parseKeycodeText(els.kcHex.value);
+    const curMs = cur.ok ? modState(cur.code) : null;
+    const next = Number(b.dataset.code);
+    const nextMs = modState(next);
+    const keep = curMs !== null && !curMs.isRight && nextMs !== null ? curMs.bits : 0;
+    els.kcHex.value = keycodeHex(next | keep);
     updatePreview();
   });
+  els.lkKinds.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".lk");
+    if (b && !b.disabled) onLayerKindClick(b.dataset.kind);
+  });
+  els.lkTargets.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".lt");
+    if (b && !b.disabled) onLayerTargetClick(Number(b.dataset.n));
+  });
+  els.modBoxes.forEach((box) => box.addEventListener("change", onModToggle));
   els.kcHex.addEventListener("input", updatePreview);
   els.kcHex.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
@@ -1070,10 +1761,11 @@ function init() {
     }
   });
   els.btnSet.addEventListener("click", applyEdit);
+  els.btnRevert.addEventListener("click", revertKey);
+  els.btnDeselect.addEventListener("click", deselectKey);
   // 保存・読み直し・初期化
   els.btnSave.addEventListener("click", doSave);
   els.btnLoad.addEventListener("click", doLoad);
-  els.btnReset.addEventListener("click", doReset);
   // 未保存の変更があるまま、ページを閉じたり移動したりしようとしたときの警告
   window.addEventListener("beforeunload", (ev) => {
     if (transport !== null && changedCount() > 0) {
@@ -1087,7 +1779,8 @@ function init() {
       transport.close();
     }
   });
-  setStatus("off", "未接続");
+  els.btnCopyUrl.addEventListener("click", copyPageUrl);
+  setWelcome("idle");
   updateButtons();
 }
 

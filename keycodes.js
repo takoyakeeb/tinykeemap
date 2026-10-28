@@ -35,7 +35,7 @@ const KEYCODE_GROUPS = [
 
 // [値, 名前, 別名(なければ空), 表示名, グループ]
 const KEYCODE_ROWS = [
-  [0x0000, "KC_NO", "XXXXXXX", "何もしない", "special"],
+  [0x0000, "KC_NO", "XXXXXXX", "無効", "special"],
   [0x0001, "KC_TRANSPARENT", "KC_TRNS", "透過(下のレイヤーを使う)", "special"],
   [0x0004, "KC_A", "", "A", "letters"],
   [0x0005, "KC_B", "", "B", "letters"],
@@ -225,17 +225,15 @@ const LAYER_KEY_MAX = 31; // 5bit で表せる最大のレイヤー番号
 
 // 種類の表。一覧には、この順番で出る。first は、一覧に出す最初のレイヤー番号
 //   MO(0) / TG(0) は何もしないので、一覧には出さない(入力すれば送れる)
-//   TO(0) は「切り替えをすべて解除して、土台のレイヤー0に戻る」キーとして使えるので、一覧に出す
+//   TO(0) は「切り替えを解除して、レイヤー0に戻る」キーとして使えるので、一覧に出す(押している間のMOは残る)
 const LAYER_KEY_KINDS = [
-  { name: "MO", base: 0x5220, first: 1, label: (n) => "押している間だけレイヤー " + n + " を有効にする" },
-  { name: "TG", base: 0x5260, first: 1, label: (n) => "押すたびにレイヤー " + n + " の有効・無効を切り替える" },
+  { name: "MO", base: 0x5220, first: 1, label: (n) => "押している間 L" + n },
+  { name: "TG", base: 0x5260, first: 1, label: (n) => "押すたびに L" + n + " を切り替え" },
   {
     name: "TO",
     base: 0x5200,
     first: 0,
-    label: (n) => (n === 0
-      ? "切り替えをすべて解除して、土台のレイヤー 0 に戻る"
-      : "切り替えを解除して、レイヤー " + n + " だけを有効にする"),
+    label: (n) => (n === 0 ? "L0 に戻る" : "L" + n + " へ移る"),
   },
 ];
 
@@ -392,4 +390,104 @@ function searchKeycodes(text) {
     const hay = (keycodeHex(k.code) + " " + k.name + " " + k.alias + " " + k.label).toLowerCase();
     return words.every((w) => hay.includes(w));
   });
+}
+
+/* ---- マスの表示(キーの絵に出す、短い名前) ---- */
+
+// マスには、16進は出さず、読める短い名前だけを出す(2段: 上に小さく small、下に大きく main)。
+// 長い表示名(「左 GUI(Windows / Super キー)」など)は、ここで短くする。画面の説明文や一覧の表示名は、そのまま。
+const CAP_SHORT = new Map([
+  [0x0028, "Enter"], [0x0029, "Esc"], [0x002a, "BS"], [0x002b, "Tab"], [0x002c, "Space"], [0x0039, "Caps"],
+  [0x0046, "PrtSc"], [0x0047, "ScrLk"], [0x0048, "Pause"], [0x0049, "Ins"], [0x004a, "Home"], [0x004b, "PgUp"],
+  [0x004c, "Del"], [0x004d, "End"], [0x004e, "PgDn"], [0x0053, "Num"], [0x0065, "App"], [0x0066, "Power"],
+  [0x007f, "Mute"], [0x0080, "Vol+"], [0x0081, "Vol-"],
+]);
+
+// レイヤー切り替えの、上の小さい文字(2段)と、矢印(1行)
+const CAP_LAYER_SMALL = { MO: "押す間", TG: "切替", TO: "移動" };
+const CAP_LAYER_ARROW = { MO: "↓", TG: "⇄", TO: "→" };
+
+// 修飾キーの記号(1行にするとき)。GUI は、2段のときと表記をそろえて「GUI」と書く(10/27の決定)。
+// ⌘ にするかは、OS の判別と一緒に②で見直す
+const CAP_MOD_SYMBOL = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", GUI: "GUI" };
+
+function capBaseName(code) {
+  const k = KEYCODE_BY_CODE.get(code);
+  if (!k) return keycodeHex(code);
+  return CAP_SHORT.has(code) ? CAP_SHORT.get(code) : k.label;
+}
+
+// 修飾キー付きの値を、{ mods, isRight, baseCode } に分ける(違えば null)
+function splitModified(code) {
+  if (code < 0x0100 || code > 0x1fff) return null;
+  const baseCode = code & 0x00ff;
+  if (baseCode < BASIC_KEY_MIN || baseCode > BASIC_KEY_MAX || !KEYCODE_BY_CODE.has(baseCode)) return null;
+  const mods = MOD_KINDS.filter((m) => (code & m.bit) !== 0);
+  if (mods.length === 0) return null;
+  return { mods, isRight: (code & MOD_RIGHT_BIT) !== 0, baseCode };
+}
+
+// マスに出す表示を作る。compact が true のときは、1行にまとめる(マスが小さいとき)
+//   戻り値: { small, main, kind }(kind: "none" 何もしない / "trans" 透過 / "normal")
+function capFace(code, compact) {
+  if (code === 0x0000) return { small: "", main: "無効", kind: "none" };
+  if (code === 0x0001) return { small: "", main: "透過", kind: "trans" };
+  const lk = decodeLayerKey(code);
+  if (lk) {
+    const out = deviceLayers > 0 && lk.n >= deviceLayers;
+    const main = "L" + lk.n;
+    if (compact) return { small: "", main: CAP_LAYER_ARROW[lk.kind.name] + main + (out ? "?" : ""), kind: "normal" };
+    return { small: out ? "範囲外" : CAP_LAYER_SMALL[lk.kind.name], main, kind: "normal" };
+  }
+  const mod = splitModified(code);
+  if (mod) {
+    const base = capBaseName(mod.baseCode);
+    if (compact) return { small: "", main: mod.mods.map((m) => CAP_MOD_SYMBOL[m.label]).join("") + base, kind: "normal" };
+    return { small: mod.mods.map((m) => (mod.isRight ? "右" : "") + m.label).join(" "), main: base, kind: "normal" };
+  }
+  const k = KEYCODE_BY_CODE.get(code);
+  if (!k) return { small: "", main: keycodeHex(code), kind: "normal" }; // 一覧にない値だけは、16進で出す
+  if (k.group === "modifier") {
+    // 修飾キー単体: 「左 GUI(Windows / Super キー)」→ 上に「左」、下に「GUI」
+    const kind = MOD_KINDS[(code - 0x00e0) & 3];
+    const side = code >= 0x00e4 ? "右" : "左";
+    return compact ? { small: "", main: side + kind.label, kind: "normal" } : { small: side, main: kind.label, kind: "normal" };
+  }
+  if (k.group === "keypad" && k.label.startsWith("テンキー ")) {
+    const rest = k.label.slice("テンキー ".length);
+    return compact ? { small: "", main: "KP" + rest, kind: "normal" } : { small: "テンキー", main: rest, kind: "normal" };
+  }
+  return { small: "", main: capBaseName(code), kind: "normal" };
+}
+
+/* ---- 編集パネルのカテゴリ(キーを選ぶボタンの一覧を、種類ごとに分ける) ---- */
+
+// 一覧のカテゴリ。「その他」は、どれにも入らないキー(テンキー、システム・メディア、日本語・国際キー、F13〜F24 など)
+const KEY_CATEGORIES = [
+  { id: "basic", title: "基本" },
+  { id: "alpha", title: "英字" },
+  { id: "num", title: "数字" },
+  { id: "arrow", title: "矢印" },
+  { id: "fn", title: "F1〜F12" },
+  { id: "sym", title: "記号" },
+  { id: "other", title: "その他" },
+];
+
+// 矢印: ↑↓←→ と Home・End・PgUp・PgDn(値は USB HID の Usage ID)
+const ARROW_CODES = new Set([0x004a, 0x004b, 0x004d, 0x004e, 0x004f, 0x0050, 0x0051, 0x0052]);
+
+// キーの項目 → カテゴリの id。どのキーも、ちょうど1つのカテゴリに入る
+function keyCategory(k) {
+  switch (k.group) {
+    case "letters": return "alpha";
+    case "numbers": return "num";
+    case "basic": return "basic";
+    case "modifier": return "basic";
+    case "symbols": return "sym";
+    case "function": return k.code <= 0x0045 ? "fn" : "other"; // F1〜F12 は 0x003A〜0x0045
+    case "navigation":
+      if (ARROW_CODES.has(k.code)) return "arrow";
+      return k.code === 0x004c ? "basic" : "other"; // Delete は「基本」
+    default: return "other"; // special(何もしない・透過)、keypad、system、international、other
+  }
 }
