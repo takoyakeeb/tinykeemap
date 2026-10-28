@@ -302,6 +302,8 @@ const els = {
   menu: document.getElementById("menu"),
   menuReset: document.getElementById("menu-reset"),
   menuDetail: document.getElementById("menu-detail"),
+  menuDirect: document.getElementById("menu-direct"),
+  kcDirect: document.getElementById("kc-direct"),
   menuLayout: document.getElementById("menu-layout"),
   menuLayoutClear: document.getElementById("menu-layout-clear"),
   layoutFile: document.getElementById("layout-file"),
@@ -404,6 +406,7 @@ function updateSaveControls() {
   els.menuLayoutClear.disabled = !usable;
   els.btnLoad.disabled = !usable;
   els.menuReset.disabled = !usable;
+  els.menuDirect.disabled = !usable;
 }
 
 function updateEditControls() {
@@ -1554,6 +1557,17 @@ function setDetailOpen(open) {
   if (open) els.detail.scrollIntoView({ block: "start" });
 }
 
+// 「keycode を直接入力…」: パネルの下に、keycode の入力欄を開く・閉じる
+function setDirectOpen(open) {
+  els.kcDirect.hidden = !open;
+  els.menuDirect.setAttribute("aria-expanded", open ? "true" : "false");
+  els.menuDirect.textContent = open ? "keycode の直接入力を閉じる" : "keycode を直接入力…";
+  if (open) {
+    els.kcHex.focus();
+    els.kcDirect.scrollIntoView({ block: "nearest" });
+  }
+}
+
 // 「初期のキーマップに戻す…」: 確認の小窓を出す(RESET を送るのは「戻す」を押したとき)
 function askReset() {
   if (!canOperate()) return;
@@ -1575,6 +1589,7 @@ function initTopBar() {
   });
   els.menuReset.addEventListener("click", askReset);
   els.menuDetail.addEventListener("click", () => setDetailOpen(!detailOpen));
+  els.menuDirect.addEventListener("click", () => setDirectOpen(els.kcDirect.hidden));
   els.menuLayout.addEventListener("click", askLayoutFile);
   els.menuLayoutClear.addEventListener("click", clearCustomLayout);
   els.layoutFile.addEventListener("change", onLayoutFileChosen);

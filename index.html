@@ -27,6 +27,7 @@
         <button id="menu-reset" type="button" role="menuitem" disabled>初期のキーマップに戻す…</button>
         <button id="menu-layout" type="button" role="menuitem" disabled title="KLE(keyboard-layout-editor.com)の JSON ファイルを選んで、キーの並びを変えます">配列を読み込む…</button>
         <button id="menu-layout-clear" type="button" role="menuitem" hidden>読み込んだ配列を消す</button>
+        <button id="menu-direct" type="button" role="menuitem" aria-expanded="false" disabled title="keycode を名前や16進で入力します(開発者向け)">keycode を直接入力…</button>
         <button id="menu-detail" type="button" role="menuitem" aria-expanded="false">デバイス情報・通信ログ</button>
         <button id="menu-reload" type="button" role="menuitem" disabled title="キーボードから、いまの内容を読み込み直します(保存済みの内容を読む「読み直す」とは別です)">再読み込み</button>
         <button id="menu-disconnect" type="button" role="menuitem" disabled>切断する</button>
@@ -97,10 +98,13 @@
           <div id="kc-after" class="kc-after" aria-live="polite">—</div>
           <button id="btn-set" type="button" disabled>変更する</button>
           <p class="hint save-note">「保存する」までは、USBを抜くと元に戻ります。</p>
-          <label for="kc-hex" class="hex-label">keycode(名前または16進。例: KC_A、MO(1)、LSFT(KC_A)、0x0004)</label>
-          <input id="kc-hex" type="text" placeholder="KC_A" autocomplete="off" spellcheck="false" disabled>
-          <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
         </div>
+      </div>
+      <!-- 「…」メニューの「keycode を直接入力…」で開く(開発者向け) -->
+      <div id="kc-direct" class="direct" hidden>
+        <label for="kc-hex">keycode(名前または16進。例: KC_A、MO(1)、LSFT(KC_A)、0x0004)</label>
+        <input id="kc-hex" type="text" placeholder="KC_A" autocomplete="off" spellcheck="false" disabled>
+        <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
       </div>
       <div id="edit-msg" class="edit-msg" role="status" hidden></div>
     </section>

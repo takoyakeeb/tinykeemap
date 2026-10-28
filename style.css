@@ -384,7 +384,19 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 /* 右の欄: 変更後 */
 .after-label { font-size: 12px; color: var(--muted); }
 .kc-after { min-height: 1.6em; margin: 2px 0 10px; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
-.hex-label { margin-top: 16px; }
+/* 「keycode を直接入力…」で開く欄(パネルの下) */
+.direct { max-width: 520px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.direct label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted); }
+.direct input {
+  width: 100%;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--line-key);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+}
+.direct input:disabled { background: var(--disabled-bg); color: var(--off); }
 
 .kc-preview { min-height: 1.6em; margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .kc-preview.bad { color: var(--err-ink); }
