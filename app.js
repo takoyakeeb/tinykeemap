@@ -326,6 +326,8 @@ const els = {
   kcCats: document.getElementById("kc-cats"),
   kcGrid: document.getElementById("kc-grid"),
   kcAfter: document.getElementById("kc-after"),
+  modBoxes: Array.from(document.querySelectorAll("#mod-box input[type=checkbox]")),
+  modHint: document.getElementById("mod-hint"),
   kcHex: document.getElementById("kc-hex"),
   kcPreview: document.getElementById("kc-preview"),
   btnSet: document.getElementById("btn-set"),
@@ -766,14 +768,53 @@ function renderPicker() {
 }
 
 // 入力欄の keycode と同じボタンに、印を付ける
+//   修飾キー付き(Ctrl+↓ など)のときは、中のキー(↓)のボタンに印を付ける。修飾キーのチェックボックスも、ここで合わせる
 function markPicked() {
   const p = parseKeycodeText(els.kcHex.value);
-  const code = p.ok ? p.code : null;
+  const ms = p.ok ? modState(p.code) : null;
+  const code = p.ok ? (ms ? ms.baseCode : p.code) : null;
   els.kcGrid.querySelectorAll(".kb").forEach((b) => {
     const on = code !== null && Number(b.dataset.code) === code;
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
   });
+  updateModBoxes(ms);
+}
+
+/* ---- 修飾キーのチェックボックス(Ctrl・Shift・Alt・GUI) ---- */
+
+// 値を、{ baseCode, bits, isRight } に分ける。修飾キーを付けられない値(レイヤー切り替え、修飾キー単体、
+// 何もしない・透過、一覧にない値など)は null。bits は、付いている修飾キーのビット(Ctrl 0x0100 … GUI 0x0800)
+function modState(code) {
+  const m = splitModified(code);
+  if (m) return { baseCode: m.baseCode, bits: m.mods.reduce((a, x) => a | x.bit, 0), isRight: m.isRight };
+  if (code >= BASIC_KEY_MIN && code <= BASIC_KEY_MAX && KEYCODE_BY_CODE.has(code)) {
+    return { baseCode: code, bits: 0, isRight: false };
+  }
+  return null;
+}
+
+// チェックボックスを、入力欄の keycode に合わせる。付けられるのは、基本キーだけ。
+// 右側の修飾キー付き(RSFT(KC_A) など)は、チェックの状態だけ見せて、触れなくする(直接入力で変える)
+function updateModBoxes(ms) {
+  const usable = canOperate();
+  const editable = usable && ms !== null && !ms.isRight;
+  for (const box of els.modBoxes) {
+    box.checked = ms !== null && (ms.bits & Number(box.dataset.bit)) !== 0;
+    box.disabled = !editable;
+  }
+  els.modHint.hidden = !(ms !== null && ms.isRight);
+}
+
+// チェックボックスを押したとき: 入力欄の keycode に、修飾キーを付け外しする(左側のみ)
+function onModToggle() {
+  const p = parseKeycodeText(els.kcHex.value);
+  const ms = p.ok ? modState(p.code) : null;
+  if (ms === null || ms.isRight) return;
+  let bits = 0;
+  for (const box of els.modBoxes) if (box.checked) bits |= Number(box.dataset.bit);
+  els.kcHex.value = keycodeHex(ms.baseCode | bits);
+  updatePreview();
 }
 
 // 選んだマスの keycode に合わせて、種類のタブとカテゴリを切り替える(名前の検索は空にする)
@@ -1470,9 +1511,16 @@ function init() {
   els.kcGrid.addEventListener("click", (ev) => {
     const b = ev.target.closest(".kb");
     if (!b || b.disabled) return;
-    els.kcHex.value = keycodeHex(Number(b.dataset.code));
+    // 修飾キーのチェックが付いていて、選んだのが基本キーなら、そのチェックを引き継ぐ(Shift を付けたまま、A → B と選べる)
+    const cur = parseKeycodeText(els.kcHex.value);
+    const curMs = cur.ok ? modState(cur.code) : null;
+    const next = Number(b.dataset.code);
+    const nextMs = modState(next);
+    const keep = curMs !== null && !curMs.isRight && nextMs !== null ? curMs.bits : 0;
+    els.kcHex.value = keycodeHex(next | keep);
     updatePreview();
   });
+  els.modBoxes.forEach((box) => box.addEventListener("change", onModToggle));
   els.kcHex.addEventListener("input", updatePreview);
   els.kcHex.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {

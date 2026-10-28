@@ -80,12 +80,20 @@
           <div id="kc-grid" class="kgrid" role="group" aria-label="キーの一覧"></div>
         </div>
         <div class="edit-value">
+          <fieldset id="mod-box" class="mods">
+            <legend>同時に押すキー</legend>
+            <label><input type="checkbox" data-bit="256" disabled> Ctrl</label>
+            <label><input type="checkbox" data-bit="512" disabled> Shift</label>
+            <label><input type="checkbox" data-bit="1024" disabled> Alt</label>
+            <label><input type="checkbox" data-bit="2048" disabled> GUI <span class="mod-note">(Mac は ⌘、Windows は ⊞)</span></label>
+          </fieldset>
+          <p id="mod-hint" class="hint mod-hint" hidden>右側の修飾キーが付いています。ここでは変えられません。</p>
           <div class="after-label">変更後</div>
           <div id="kc-after" class="kc-after" aria-live="polite">—</div>
           <button id="btn-set" type="button" disabled>変更する</button>
-          <p class="hint save-note">すぐ反映されます。「保存する」までは、USBを抜くと元に戻ります。</p>
-          <label for="kc-hex" class="hex-label">keycode(16進、または名前。例: 0x0004、KC_A、MO(1)、LSFT(KC_A))</label>
-          <input id="kc-hex" type="text" placeholder="0x0004" autocomplete="off" spellcheck="false" disabled>
+          <p class="hint save-note">「保存する」までは、USBを抜くと元に戻ります。</p>
+          <label for="kc-hex" class="hex-label">keycode(名前または16進。例: KC_A、MO(1)、LSFT(KC_A)、0x0004)</label>
+          <input id="kc-hex" type="text" placeholder="KC_A" autocomplete="off" spellcheck="false" disabled>
           <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
         </div>
       </div>

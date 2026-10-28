@@ -338,6 +338,16 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 .kb.on { background: var(--sel-bg); border-color: var(--sel-edge); font-weight: 500; }
 .kb.on:disabled { background: var(--sel-bg); color: var(--ink); }
 
+/* 右の欄: いっしょに押すキー(修飾キーのチェックボックス) */
+.mods { margin: 0 0 12px; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 0 16px; }
+.mods legend { width: 100%; padding: 0; margin-bottom: 2px; font-size: 12px; color: var(--muted); }
+.edit-grid .mods label { display: flex; align-items: center; gap: 6px; min-height: 30px; margin: 0; font-size: 13px; color: var(--ink); cursor: pointer; }
+.edit-grid .mods input[type="checkbox"] { width: 15px; height: 15px; margin: 0; padding: 0; accent-color: var(--focus); }
+.mods input:disabled { cursor: not-allowed; }
+.mods label:has(input:disabled) { color: var(--off); cursor: not-allowed; }
+.mod-note { font-size: 11px; color: var(--muted); }
+.mod-hint { margin: -6px 0 10px; }
+
 /* 右の欄: 変更後 */
 .after-label { font-size: 12px; color: var(--muted); }
 .kc-after { min-height: 1.6em; margin: 2px 0 10px; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
