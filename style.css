@@ -1,7 +1,7 @@
 /* ---- 色(変数にまとめる。将来のダークモードや差し替えは、ここだけを直す) ---- */
 :root {
   --bg: #fdfdfb;
-  --panel: #fffffd;
+  --panel: var(--bg);
   --ink: #45473f;
   --ink-soft: #55574e;
   --muted: #6b6d64;
@@ -239,7 +239,7 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
   position: sticky;
   bottom: 0;
   z-index: 2;
-  max-height: 60vh;
+  max-height: 45vh; /* 低い画面でも、キーの絵を隠しすぎない。中身は、パネルの中でスクロール */
   overflow-y: auto;
   margin-top: 16px;
   padding: 14px 0 16px;
@@ -248,10 +248,11 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 }
 .edit-dock h2 { margin-bottom: 8px; }
 /* 左のカード(選んだキー) */
-.edit-card { position: relative; text-align: center; }
-.edit-dock h2.card-title { margin: 0 0 10px; font-size: 11px; font-weight: 400; letter-spacing: 0.06em; color: var(--muted); }
+.edit-card { text-align: center; }
+.card-head { display: flex; justify-content: center; align-items: center; gap: 2px; margin: 0 0 10px; min-height: 24px; }
+.edit-dock h2.card-title { margin: 0; font-size: 11px; font-weight: 400; letter-spacing: 0.06em; color: var(--muted); }
 .card-body { text-align: center; }
-.card-close { position: absolute; right: 0; top: -6px; width: 28px; height: 28px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; }
+.card-close { width: 24px; height: 24px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; }
 .card-close:hover:not(:disabled) { border: 0; color: var(--ink); }
 .card-cap {
   display: inline-flex;
@@ -317,7 +318,7 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
   gap: 6px;
   margin-top: 8px;
-  max-height: 180px; /* 長い一覧(その他など)は、一覧の中でスクロールする。パネルが、キーの絵を隠しすぎないように */
+  max-height: clamp(76px, 20vh, 180px); /* 長い一覧(その他など)は、一覧の中でスクロールする。パネルが、キーの絵を隠しすぎないように */
   overflow-y: auto;
   padding: 1px; /* 印の枠が切れないように */
 }

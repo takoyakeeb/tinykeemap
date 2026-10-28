@@ -336,6 +336,7 @@ const els = {
   kcHex: document.getElementById("kc-hex"),
   kcPreview: document.getElementById("kc-preview"),
   btnSet: document.getElementById("btn-set"),
+  btnRevert: document.getElementById("btn-revert"),
   editMsg: document.getElementById("edit-msg"),
   btnSave: document.getElementById("btn-save"),
   btnLoad: document.getElementById("btn-load"),
@@ -415,6 +416,19 @@ function updateEditControls() {
   if (pickKind === "layer") updateLayerPick(); // 切り替え先 L0 は、TO のときだけ選べる
   els.kcHex.disabled = !usable;
   els.btnSet.disabled = !(usable && model.selected !== null);
+  updateRevert();
+}
+
+// 「元に戻す」: 選んでいるキーが未保存のときだけ出す(戻す先は、読み込んだ値・保存した値)
+function canRevert() {
+  if (!model || !model.selected || !baselineFits(model.codes)) return false;
+  const { layer, index } = model.selected;
+  return model.codes[layer][index] !== baseline[layer][index];
+}
+
+function updateRevert() {
+  els.btnRevert.hidden = !canRevert();
+  els.btnRevert.disabled = !canOperate();
 }
 
 function clearResults() {
@@ -643,7 +657,7 @@ function relayoutStage() {
 }
 
 // INFO → 全レイヤーの DUMP を順に読んで表示する
-async function loadAll() {
+async function loadAll(startLayer) {
   busy = true;
   updateButtons();
   clearError();
@@ -681,6 +695,12 @@ async function loadAll() {
       renderLayer(layer, codes, info);
     }
     buildTabs();
+    // 再読み込みや配列の読み込みでは、見ているレイヤーを保つ(接続したときは、レイヤー 0)
+    if (typeof startLayer === "number" && startLayer > 0 && startLayer < info.layers) {
+      model.current = startLayer;
+      model.sections.forEach((sec, l) => { sec.hidden = l !== startLayer; });
+      updateTabs();
+    }
     // 最初の読み込みでは、今の内容を「保存済み」とみなす。再読み込みでは、前の基準を保つ
     if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
     refreshDirtyMarks();
@@ -1044,6 +1064,7 @@ function deselectKey() {
 function updateCard() {
   const sel = model ? model.selected : null;
   els.cardBody.hidden = sel === null;
+  els.btnDeselect.hidden = sel === null;
   els.editTitle.textContent = sel === null ? "キーを選んでください" : "キー " + sel.index;
   if (sel === null) return;
   const code = model.codes[sel.layer][sel.index];
@@ -1104,13 +1125,29 @@ async function readKey(layer, index) {
   return parseDumpData(resp.data, 1)[0];
 }
 
-function keyLabel(code) {
+// メッセージに出す名前(16進は出さない。一覧にない値だけ16進)
+function keyName(code) {
   const k = findKeycode(code);
-  return keycodeHex(code) + (k ? "(" + k.name + ")" : "");
+  return k ? k.label : "一覧にない値 " + keycodeHex(code);
 }
 
 // 選んだマスに、入力欄の keycode を SET で送る(RAMだけ。Flash は変わらない)
 async function applyEdit() {
+  await doEdit(false);
+}
+
+// 「元に戻す」: 選んでいるキーを、読み込んだ値・保存した値に戻す(SET を送る。Flash は変わらない)
+async function revertKey() {
+  if (!canRevert() || busy || transport === null) return;
+  const { layer, index } = model.selected;
+  const code = baseline[layer][index];
+  els.kcHex.value = hex4(code);
+  syncPickerTo(code);
+  updatePreview();
+  await doEdit(true);
+}
+
+async function doEdit(isRevert) {
   if (!model || !model.selected || busy || transport === null) return;
   const { layer, index } = model.selected;
   const where = "レイヤー " + layer + " / キー " + index;
@@ -1123,7 +1160,7 @@ async function applyEdit() {
   }
   const code = parsed.code;
   if (code === model.codes[layer][index]) {
-    showEditMessage("info", where + " は、すでに " + keyLabel(code) + " です(何も送っていません)。");
+    showEditMessage("info", where + " は、すでに " + keyName(code) + " です。");
     return;
   }
 
@@ -1137,7 +1174,7 @@ async function applyEdit() {
     model.codes[layer][index] = code;
     fillCap(cap, layer, index, code);
     refreshDirtyMarks();
-    showEditMessage("ok", where + " を " + keyLabel(code) + " に変更しました。まだ保存していません(「保存する」を押すまで、USBを抜き差しすると元に戻ります)。");
+    showEditMessage("ok", isRevert ? where + " を元に戻しました。" : where + " を " + keyName(code) + " に変更しました。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
     await handleSetError(e, layer, index, code, cap);
@@ -1153,17 +1190,17 @@ async function handleSetError(e, layer, index, code, cap) {
     cap.classList.add("set-failed");
     const detail = "ERR " + e.code + (e.message ? " " + e.message : "");
     if (e.code === "BADARG") {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスが " + keycodeHex(code) + " に対応していません(" + detail + ")。キーマップは変わっていません。");
+      showEditMessage("fail", where + " は変更できませんでした。デバイスが " + keycodeHex(code) + " に対応していません。");
     } else if (e.code === "RANGE") {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスが、レイヤーまたはキー番号を範囲外だと言っています(" + detail + ")。ツールとデバイスの設定が食い違っているので、「…」メニューの「再読み込み」で読み直してください。");
+      showEditMessage("fail", where + " は変更できませんでした。範囲外です。「…」メニューの「再読み込み」を試してください。");
     } else {
-      showEditMessage("fail", where + " は変更できませんでした。デバイスがエラーを返しました(" + detail + ")。");
+      showEditMessage("fail", where + " は変更できませんでした。(" + detail + ")");
     }
     return;
   }
   if (e instanceof TimeoutError) {
     // 変更が届いたかどうか分からない。遅れた応答が届くのを待ってから、そのキーだけ読み直す
-    showEditMessage("info", where + ": 応答が時間内に来ませんでした。変更されたか分からないので、遅れた応答を待って、値を読み直します…");
+    showEditMessage("info", where + ": 応答がありません。値を読み直します…");
     try {
       const actual = await readKey(layer, index);
       if (transport === null) return;
@@ -1171,10 +1208,10 @@ async function handleSetError(e, layer, index, code, cap) {
       fillCap(cap, layer, index, actual);
       refreshDirtyMarks();
       if (actual === code) {
-        showEditMessage("ok", where + ": 応答は遅れましたが、" + keyLabel(actual) + " に変更されていました。まだ保存していません(「保存する」を押すまで、USBを抜き差しすると元に戻ります)。");
+        showEditMessage("ok", where + " を " + keyName(actual) + " に変更しました。");
       } else {
         cap.classList.add("set-failed");
-        showEditMessage("fail", where + ": 変更は反映されていませんでした。今の値は " + keyLabel(actual) + " です。");
+        showEditMessage("fail", where + ": 変更されていませんでした。今の値は " + keyName(actual) + " です。");
       }
     } catch (e2) {
       if (transport === null) return;
@@ -1213,6 +1250,7 @@ function changedCount() {
 function refreshDirtyMarks() {
   updateTabs();
   updateCard();
+  updateRevert();
   if (!model || !baselineFits(model.codes)) {
     els.dirtyBadge.textContent = "";
     return;
@@ -1516,7 +1554,7 @@ async function onLayoutFileChosen() {
     return;
   }
   const { stored } = saveCustomLayout(info.name, kle, file.name);
-  await loadAll(); // 並びを作り直す(キーボードの内容と、未保存の変更はそのまま)
+  await loadAll(model ? model.current : 0); // 並びを作り直す(キーボードの内容と、未保存の変更はそのまま)
   if (model === null) return; // 読み込みに失敗したときは、そちらのエラーを出したまま
   if (stored) {
     showSaveMessage("ok", "配列を読み込みました。次回の接続からも使います。");
@@ -1529,7 +1567,7 @@ async function onLayoutFileChosen() {
 async function clearCustomLayout() {
   if (!canOperate() || model.custom === null) return;
   removeCustomLayout(model.info.name);
-  await loadAll();
+  await loadAll(model ? model.current : 0);
   if (model !== null) showSaveMessage("ok", "読み込んだ配列を消しました。");
 }
 
@@ -1630,7 +1668,7 @@ function init() {
   }
   window.addEventListener("resize", relayoutStage);
   els.connect.addEventListener("click", connect);
-  els.reload.addEventListener("click", loadAll);
+  els.reload.addEventListener("click", () => loadAll(model ? model.current : 0));
   els.disconnect.addEventListener("click", disconnect);
   // 編集欄
   renderPicker();
@@ -1673,6 +1711,7 @@ function init() {
     }
   });
   els.btnSet.addEventListener("click", applyEdit);
+  els.btnRevert.addEventListener("click", revertKey);
   els.btnDeselect.addEventListener("click", deselectKey);
   // 保存・読み直し・初期化
   els.btnSave.addEventListener("click", doSave);

@@ -61,9 +61,11 @@
     <section class="panel edit-dock" id="edit-panel" aria-labelledby="edit-title" hidden>
       <div class="edit-grid">
         <div class="edit-card">
-          <h2 id="edit-title" class="card-title">キーを選んでください</h2>
+          <div class="card-head">
+            <h2 id="edit-title" class="card-title">キーを選んでください</h2>
+            <button id="btn-deselect" class="card-close" type="button" aria-label="選択をやめる" hidden>×</button>
+          </div>
           <div id="card-body" class="card-body" hidden>
-            <button id="btn-deselect" class="card-close" type="button" aria-label="選択をやめる">×</button>
             <div id="card-cap" class="card-cap" aria-hidden="true"></div>
             <p id="card-name" class="card-name"></p>
           </div>
@@ -96,7 +98,10 @@
           <p id="mod-hint" class="hint mod-hint" hidden>右側の修飾キーが付いています。ここでは変えられません。</p>
           <div class="after-label">変更後</div>
           <div id="kc-after" class="kc-after" aria-live="polite">—</div>
-          <button id="btn-set" type="button" disabled>変更する</button>
+          <div class="row">
+            <button id="btn-set" type="button" disabled>変更する</button>
+            <button id="btn-revert" class="btn-text" type="button" hidden title="このキーを、読み込んだ値・保存した値に戻します">元に戻す</button>
+          </div>
           <p class="hint save-note">「保存する」までは、USBを抜くと元に戻ります。</p>
         </div>
       </div>
