@@ -318,8 +318,14 @@ const els = {
   cardBody: document.getElementById("card-body"),
   cardCap: document.getElementById("card-cap"),
   cardName: document.getElementById("card-name"),
+  editPick: document.getElementById("edit-pick"),
+  kindKey: document.getElementById("kind-key"),
+  kindLayer: document.getElementById("kind-layer"),
+  pickKey: document.getElementById("pick-key"),
   kcSearch: document.getElementById("kc-search"),
-  kcList: document.getElementById("kc-list"),
+  kcCats: document.getElementById("kc-cats"),
+  kcGrid: document.getElementById("kc-grid"),
+  kcAfter: document.getElementById("kc-after"),
   kcHex: document.getElementById("kc-hex"),
   kcPreview: document.getElementById("kc-preview"),
   btnSet: document.getElementById("btn-set"),
@@ -397,8 +403,7 @@ function updateSaveControls() {
 
 function updateEditControls() {
   const usable = canOperate();
-  els.kcSearch.disabled = !usable;
-  els.kcList.disabled = !usable;
+  els.editPick.querySelectorAll("button, input").forEach((el) => { el.disabled = !usable; });
   els.kcHex.disabled = !usable;
   els.btnSet.disabled = !(usable && model.selected !== null);
 }
@@ -412,7 +417,7 @@ function clearResults() {
   els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
   model = null;
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
-  populateKeycodeList(els.kcSearch.value);
+  renderPicker();
   els.kcHex.value = "";
   updatePreview();
   clearEditMessage();
@@ -645,7 +650,7 @@ async function loadAll() {
     renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
-    populateKeycodeList(els.kcSearch.value);
+    renderPicker();
 
     const warnings = [];
     if (info.proto !== 1) {
@@ -699,31 +704,90 @@ function clearEditMessage() {
   els.editMsg.textContent = "";
 }
 
-// keycode の一覧を作る(絞り込み文字に合うものだけ、グループごとに)
-function populateKeycodeList(filterText) {
-  const keep = els.kcList.value;
-  els.kcList.replaceChildren();
-  const hits = searchKeycodes(filterText);
-  for (const g of KEYCODE_GROUPS) {
-    const items = hits.filter((k) => k.group === g.id);
-    if (items.length === 0) continue;
-    const og = document.createElement("optgroup");
-    og.label = g.title;
-    for (const k of items) {
-      const o = document.createElement("option");
-      o.value = String(k.code);
-      o.textContent = keycodeHex(k.code) + "  " + k.name + "  " + k.label;
-      og.appendChild(o);
+// 選ぶ欄の状態(種類のタブと、カテゴリ)
+let pickKind = "key"; // "key" | "layer"
+let pickCat = "basic";
+
+// 選ぶ欄(種類のタブ、カテゴリ、キーのボタンの一覧)を作り直す
+//   名前の検索に文字があるときは、カテゴリに関係なく、当てはまるキーをすべて出す
+function renderPicker() {
+  const usable = canOperate();
+  const searching = pickKind === "key" && els.kcSearch.value.trim() !== "";
+  for (const [btn, kind] of [[els.kindKey, "key"], [els.kindLayer, "layer"]]) {
+    btn.classList.toggle("active", pickKind === kind);
+    btn.setAttribute("aria-pressed", pickKind === kind ? "true" : "false");
+  }
+  els.pickKey.hidden = pickKind !== "key";
+  els.kcCats.replaceChildren();
+  for (const c of KEY_CATEGORIES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cat";
+    btn.dataset.cat = c.id;
+    btn.textContent = c.title;
+    const on = !searching && pickCat === c.id;
+    btn.classList.toggle("active", on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.disabled = !usable;
+    els.kcCats.appendChild(btn);
+  }
+  let list;
+  if (pickKind === "layer") list = layerKeycodes();
+  else if (searching) list = searchKeycodes(els.kcSearch.value);
+  else list = KEYCODES.filter((k) => keyCategory(k) === pickCat);
+  els.kcGrid.replaceChildren();
+  if (list.length === 0) {
+    const p = document.createElement("p");
+    p.className = "kgrid-empty";
+    p.textContent = pickKind === "layer" ? "接続すると、ここに出ます。" : "当てはまるキーがありません。";
+    els.kcGrid.appendChild(p);
+  }
+  for (const k of list) {
+    const face = capFace(k.code, false);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "kb";
+    btn.dataset.code = String(k.code);
+    btn.title = k.label + (k.warn ? "(" + k.warn + ")" : "");
+    btn.disabled = !usable;
+    if (face.small !== "") {
+      const small = document.createElement("span");
+      small.className = "small";
+      small.textContent = face.small;
+      btn.appendChild(small);
     }
-    els.kcList.appendChild(og);
+    const main = document.createElement("span");
+    main.className = "main";
+    main.textContent = face.main;
+    btn.appendChild(main);
+    els.kcGrid.appendChild(btn);
   }
-  if (hits.length === 0) {
-    const o = document.createElement("option");
-    o.disabled = true;
-    o.textContent = "(当てはまるものがありません)";
-    els.kcList.appendChild(o);
+  markPicked();
+}
+
+// 入力欄の keycode と同じボタンに、印を付ける
+function markPicked() {
+  const p = parseKeycodeText(els.kcHex.value);
+  const code = p.ok ? p.code : null;
+  els.kcGrid.querySelectorAll(".kb").forEach((b) => {
+    const on = code !== null && Number(b.dataset.code) === code;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
+// 選んだマスの keycode に合わせて、種類のタブとカテゴリを切り替える(名前の検索は空にする)
+function syncPickerTo(code) {
+  els.kcSearch.value = "";
+  if (decodeLayerKey(code)) {
+    pickKind = "layer";
+  } else {
+    pickKind = "key";
+    let k = KEYCODE_BY_CODE.get(code);
+    if (!k && code >= 0x0100 && code <= 0x1fff) k = KEYCODE_BY_CODE.get(code & 0x00ff); // 修飾キー付きは、中のキーのカテゴリ
+    if (k) pickCat = keyCategory(k);
   }
-  if (keep !== "") els.kcList.value = keep; // 絞り込み後にも残っていれば、選択を保つ
+  renderPicker();
 }
 
 // 入力欄の内容を読み取って、下に「→ 0x0004 KC_A(A)」のように見せる
@@ -732,20 +796,24 @@ function updatePreview() {
   els.kcPreview.className = "kc-preview";
   if (text.trim() === "") {
     els.kcPreview.textContent = "";
+    els.kcAfter.textContent = "—";
+    markPicked();
     return;
   }
   const p = parseKeycodeText(text);
   if (!p.ok) {
     els.kcPreview.textContent = p.reason;
     els.kcPreview.classList.add("bad");
+    els.kcAfter.textContent = "—";
+    markPicked();
     return;
   }
   const k = findKeycode(p.code);
   els.kcPreview.textContent = "→ " + keycodeHex(p.code) + (k
     ? "  " + k.name + "(" + k.label + ")" + (k.warn ? "  ⚠ " + k.warn : "")
     : "  一覧にない値です。デバイスが対応していなければ、エラーになります");
-  if (k) els.kcList.value = String(p.code);
-  else els.kcList.selectedIndex = -1;
+  els.kcAfter.textContent = k ? k.label : "一覧にない値 " + keycodeHex(p.code);
+  markPicked();
 }
 
 /* ---- レイヤーのタブ ---- */
@@ -858,6 +926,7 @@ function selectKey(layer, index) {
     cap.setAttribute("aria-pressed", on ? "true" : "false");
   }));
   els.kcHex.value = hex4(model.codes[layer][index]);
+  syncPickerTo(model.codes[layer][index]);
   updateCard();
   updatePreview();
   clearEditMessage();
@@ -1387,11 +1456,21 @@ function init() {
   els.reload.addEventListener("click", loadAll);
   els.disconnect.addEventListener("click", disconnect);
   // 編集欄
-  populateKeycodeList("");
-  els.kcSearch.addEventListener("input", () => populateKeycodeList(els.kcSearch.value));
-  els.kcList.addEventListener("change", () => {
-    if (els.kcList.value === "") return;
-    els.kcHex.value = keycodeHex(Number(els.kcList.value));
+  renderPicker();
+  els.kcSearch.addEventListener("input", renderPicker);
+  els.kindKey.addEventListener("click", () => { pickKind = "key"; renderPicker(); });
+  els.kindLayer.addEventListener("click", () => { pickKind = "layer"; renderPicker(); });
+  els.kcCats.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".cat");
+    if (!b || b.disabled) return;
+    pickCat = b.dataset.cat;
+    els.kcSearch.value = "";
+    renderPicker();
+  });
+  els.kcGrid.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".kb");
+    if (!b || b.disabled) return;
+    els.kcHex.value = keycodeHex(Number(b.dataset.code));
     updatePreview();
   });
   els.kcHex.addEventListener("input", updatePreview);

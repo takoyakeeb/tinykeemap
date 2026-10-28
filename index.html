@@ -67,17 +67,26 @@
             <p id="card-name" class="card-name"></p>
           </div>
         </div>
-        <div class="edit-pick">
-          <label for="kc-search">名前で絞り込み</label>
-          <input id="kc-search" type="search" placeholder="例: A, Enter, F5, KC_ESC" autocomplete="off" disabled>
-          <select id="kc-list" size="6" aria-label="keycode の一覧" disabled></select>
+        <div class="edit-pick" id="edit-pick">
+          <div class="tabs kinds" role="group" aria-label="種類">
+            <button id="kind-key" class="tab active" type="button" aria-pressed="true">キー</button>
+            <button id="kind-layer" class="tab" type="button" aria-pressed="false">レイヤー切り替え</button>
+          </div>
+          <div id="pick-key">
+            <label for="kc-search">名前で探す</label>
+            <input id="kc-search" type="search" placeholder="例: A, Enter, F5, KC_ESC" autocomplete="off" disabled>
+            <div id="kc-cats" class="cats" role="group" aria-label="カテゴリ"></div>
+          </div>
+          <div id="kc-grid" class="kgrid" role="group" aria-label="キーの一覧"></div>
         </div>
         <div class="edit-value">
-          <label for="kc-hex">keycode(16進、または名前。例: 0x0004、KC_A、MO(1)、LSFT(KC_A))</label>
-          <input id="kc-hex" type="text" placeholder="0x0004" autocomplete="off" spellcheck="false" disabled>
-          <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
+          <div class="after-label">変更後</div>
+          <div id="kc-after" class="kc-after" aria-live="polite">—</div>
           <button id="btn-set" type="button" disabled>変更する</button>
           <p class="hint save-note">すぐ反映されます。「保存する」までは、USBを抜くと元に戻ります。</p>
+          <label for="kc-hex" class="hex-label">keycode(16進、または名前。例: 0x0004、KC_A、MO(1)、LSFT(KC_A))</label>
+          <input id="kc-hex" type="text" placeholder="0x0004" autocomplete="off" spellcheck="false" disabled>
+          <div id="kc-preview" class="kc-preview" aria-live="polite"></div>
         </div>
       </div>
       <div id="edit-msg" class="edit-msg" role="status" hidden></div>

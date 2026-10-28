@@ -461,3 +461,35 @@ function capFace(code, compact) {
   }
   return { small: "", main: capBaseName(code), kind: "normal" };
 }
+
+/* ---- 編集パネルのカテゴリ(キーを選ぶボタンの一覧を、種類ごとに分ける) ---- */
+
+// 一覧のカテゴリ。「その他」は、どれにも入らないキー(テンキー、システム・メディア、日本語・国際キー、F13〜F24 など)
+const KEY_CATEGORIES = [
+  { id: "basic", title: "基本" },
+  { id: "alpha", title: "英字" },
+  { id: "num", title: "数字" },
+  { id: "arrow", title: "矢印" },
+  { id: "fn", title: "F1〜F12" },
+  { id: "sym", title: "記号" },
+  { id: "other", title: "その他" },
+];
+
+// 矢印: ↑↓←→ と Home・End・PgUp・PgDn(値は USB HID の Usage ID)
+const ARROW_CODES = new Set([0x004a, 0x004b, 0x004d, 0x004e, 0x004f, 0x0050, 0x0051, 0x0052]);
+
+// キーの項目 → カテゴリの id。どのキーも、ちょうど1つのカテゴリに入る
+function keyCategory(k) {
+  switch (k.group) {
+    case "letters": return "alpha";
+    case "numbers": return "num";
+    case "basic": return "basic";
+    case "modifier": return "basic";
+    case "symbols": return "sym";
+    case "function": return k.code <= 0x0045 ? "fn" : "other"; // F1〜F12 は 0x003A〜0x0045
+    case "navigation":
+      if (ARROW_CODES.has(k.code)) return "arrow";
+      return k.code === 0x004c ? "basic" : "other"; // Delete は「基本」
+    default: return "other"; // special(何もしない・透過)、keypad、system、international、other
+  }
+}

@@ -277,12 +277,11 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr) 300px;
   gap: 24px;
-  align-items: start;
+  align-items: stretch; /* 左のカードと中央の欄の高さをそろえる */
 }
 .edit-card .hint { margin: 0; }
 .edit-grid label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted); }
-.edit-grid input,
-.edit-grid select {
+.edit-grid input {
   width: 100%;
   font: inherit;
   padding: 6px 8px;
@@ -291,11 +290,60 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
   background: #fff;
   color: var(--ink);
 }
-.edit-grid input:disabled,
-.edit-grid select:disabled { background: var(--disabled-bg); color: var(--off); }
-.edit-grid select { margin-top: 8px; font-family: var(--mono); font-size: 12px; }
+.edit-grid input:disabled { background: var(--disabled-bg); color: var(--off); }
 #kc-hex { font-family: var(--mono); }
-.kc-preview { min-height: 1.6em; margin: 6px 0 12px; color: var(--muted); font-size: 12px; }
+/* 選ぶ欄(中央): 種類のタブ、名前の検索、カテゴリ、キーのボタン */
+.edit-pick { min-width: 0; }
+.kinds { margin-bottom: 8px; }
+.kinds .tab { height: 32px; }
+.edit-pick input[type="search"] { margin-bottom: 4px; }
+.cats { display: flex; flex-wrap: wrap; gap: 0 2px; margin-top: 4px; }
+.cat {
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cat:hover:not(:disabled) { border-color: transparent; border-bottom-color: var(--line-key); color: var(--ink); }
+.cat.active { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
+.cat:disabled { background: none; }
+.kgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 180px; /* 長い一覧(その他など)は、一覧の中でスクロールする。パネルが、キーの絵を隠しすぎないように */
+  overflow-y: auto;
+  padding: 1px; /* 印の枠が切れないように */
+}
+.kgrid-empty { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
+.kb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 2px 4px;
+  border-bottom-width: 2px;
+  font-size: 12px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.kb .small { font-size: 9px; color: var(--muted); font-family: var(--mono); }
+.kb.on { background: var(--sel-bg); border-color: var(--sel-edge); font-weight: 500; }
+.kb.on:disabled { background: var(--sel-bg); color: var(--ink); }
+
+/* 右の欄: 変更後 */
+.after-label { font-size: 12px; color: var(--muted); }
+.kc-after { min-height: 1.6em; margin: 2px 0 10px; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.hex-label { margin-top: 16px; }
+
+.kc-preview { min-height: 1.6em; margin: 6px 0 0; color: var(--muted); font-size: 12px; }
 .kc-preview.bad { color: var(--err-ink); }
 #btn-set { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); font-weight: 500; }
 #btn-set:disabled { background: #c9cac3; border-color: #c9cac3; color: #fff; }
