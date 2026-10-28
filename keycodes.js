@@ -35,7 +35,7 @@ const KEYCODE_GROUPS = [
 
 // [値, 名前, 別名(なければ空), 表示名, グループ]
 const KEYCODE_ROWS = [
-  [0x0000, "KC_NO", "XXXXXXX", "何もしない", "special"],
+  [0x0000, "KC_NO", "XXXXXXX", "無効", "special"],
   [0x0001, "KC_TRANSPARENT", "KC_TRNS", "透過(下のレイヤーを使う)", "special"],
   [0x0004, "KC_A", "", "A", "letters"],
   [0x0005, "KC_B", "", "B", "letters"],
@@ -430,7 +430,7 @@ function splitModified(code) {
 // マスに出す表示を作る。compact が true のときは、1行にまとめる(マスが小さいとき)
 //   戻り値: { small, main, kind }(kind: "none" 何もしない / "trans" 透過 / "normal")
 function capFace(code, compact) {
-  if (code === 0x0000) return { small: "", main: "何もしない", kind: "none" };
+  if (code === 0x0000) return { small: "", main: "無効", kind: "none" };
   if (code === 0x0001) return { small: "", main: "透過", kind: "trans" };
   const lk = decodeLayerKey(code);
   if (lk) {

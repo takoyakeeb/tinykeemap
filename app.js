@@ -566,7 +566,7 @@ function renderInfo(info, rawInfo, layoutResult) {
 
 // マスの下に添える注釈(名前など)
 function capNote(code) {
-  if (code === 0x0000) return "何もしない";
+  if (code === 0x0000) return "無効";
   if (code === 0x0001) return "透過";
   const k = findKeycode(code);
   if (!k) return "(一覧にない値)";
