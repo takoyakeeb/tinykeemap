@@ -326,6 +326,9 @@ const els = {
   kcCats: document.getElementById("kc-cats"),
   kcGrid: document.getElementById("kc-grid"),
   kcAfter: document.getElementById("kc-after"),
+  pickLayer: document.getElementById("pick-layer"),
+  lkKinds: document.getElementById("lk-kinds"),
+  lkTargets: document.getElementById("lk-targets"),
   modBoxes: Array.from(document.querySelectorAll("#mod-box input[type=checkbox]")),
   modHint: document.getElementById("mod-hint"),
   kcHex: document.getElementById("kc-hex"),
@@ -406,6 +409,7 @@ function updateSaveControls() {
 function updateEditControls() {
   const usable = canOperate();
   els.editPick.querySelectorAll("button, input").forEach((el) => { el.disabled = !usable; });
+  if (pickKind === "layer") updateLayerPick(); // 切り替え先 L0 は、TO のときだけ選べる
   els.kcHex.disabled = !usable;
   els.btnSet.disabled = !(usable && model.selected !== null);
 }
@@ -678,6 +682,7 @@ async function loadAll() {
     if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
     refreshDirtyMarks();
     els.editPanel.hidden = false;
+    renderPicker(); // レイヤー切り替えの欄に、レイヤー名(MAC・EDIT)を出すため、model を作ったあとにも作り直す
 
     setStatus("on", "接続中 (" + info.name + ")");
     if (warnings.length > 0) showError(warnings.join("\n"), true);
@@ -720,6 +725,8 @@ function renderPicker() {
     btn.setAttribute("aria-pressed", pickKind === kind ? "true" : "false");
   }
   els.pickKey.hidden = pickKind !== "key";
+  els.pickLayer.hidden = pickKind !== "layer";
+  els.kcGrid.hidden = pickKind !== "key";
   els.kcCats.replaceChildren();
   for (const c of KEY_CATEGORIES) {
     const btn = document.createElement("button");
@@ -733,15 +740,17 @@ function renderPicker() {
     btn.disabled = !usable;
     els.kcCats.appendChild(btn);
   }
-  let list;
-  if (pickKind === "layer") list = layerKeycodes();
-  else if (searching) list = searchKeycodes(els.kcSearch.value);
-  else list = KEYCODES.filter((k) => keyCategory(k) === pickCat);
+  if (pickKind === "layer") {
+    buildLayerPick(usable);
+    markPicked();
+    return;
+  }
+  const list = searching ? searchKeycodes(els.kcSearch.value) : KEYCODES.filter((k) => keyCategory(k) === pickCat);
   els.kcGrid.replaceChildren();
   if (list.length === 0) {
     const p = document.createElement("p");
     p.className = "kgrid-empty";
-    p.textContent = pickKind === "layer" ? "接続すると、ここに出ます。" : "当てはまるキーがありません。";
+    p.textContent = "当てはまるキーがありません。";
     els.kcGrid.appendChild(p);
   }
   for (const k of list) {
@@ -767,6 +776,117 @@ function renderPicker() {
   markPicked();
 }
 
+/* ---- レイヤー切り替え(MO・TG・TO と、切り替え先) ---- */
+
+// 種類のボタンの文言。MO(n) などの表記も、ボタンに残す(VIA などと名前をそろえるため)
+const LAYER_KIND_UI = {
+  MO: { title: "押している間だけ", desc: "指を離すと、元のレイヤーに戻ります" },
+  TG: { title: "押すたびに切り替え", desc: "もう一度押すと、元に戻ります" },
+  TO: { title: "そのレイヤーへ移る", desc: "そのレイヤーだけを有効にします。押している間の MO は残ります" },
+};
+let lkindDefault = "MO"; // keycode がレイヤー切り替えでないときに、切り替え先のボタンを押したときの種類
+let ltargetDefault = 1; // 同じく、種類のボタンを押したときの切り替え先
+
+// 種類(MO・TG・TO)と、切り替え先(L0〜)のボタンを作る。個数は、デバイスのレイヤー数(INFO の layers)に合わせる
+function buildLayerPick(usable) {
+  els.lkKinds.replaceChildren();
+  els.lkTargets.replaceChildren();
+  if (deviceLayers === 0) {
+    const p = document.createElement("p");
+    p.className = "kgrid-empty";
+    p.textContent = "接続すると、ここに出ます。";
+    els.lkKinds.appendChild(p);
+    return;
+  }
+  for (const kind of LAYER_KEY_KINDS) {
+    const ui = LAYER_KIND_UI[kind.name];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lk";
+    btn.dataset.kind = kind.name;
+    btn.disabled = !usable;
+    const head = document.createElement("span");
+    head.className = "lk-head";
+    const title = document.createElement("span");
+    title.className = "lk-title";
+    title.textContent = ui.title;
+    const code = document.createElement("span");
+    code.className = "lk-code";
+    code.textContent = kind.name + "(n)";
+    head.append(title, code);
+    const desc = document.createElement("span");
+    desc.className = "lk-desc";
+    desc.textContent = ui.desc;
+    btn.append(head, desc);
+    els.lkKinds.appendChild(btn);
+  }
+  const names = model && model.layout ? model.layout.layerNames : [];
+  for (let n = 0; n < deviceLayers && n <= LAYER_KEY_MAX; n++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "lt";
+    btn.dataset.n = String(n);
+    btn.disabled = !usable;
+    const num = document.createElement("span");
+    num.className = "lt-num";
+    num.textContent = "L" + n;
+    btn.appendChild(num);
+    if (names[n]) {
+      const name = document.createElement("span");
+      name.className = "lt-name";
+      name.textContent = names[n];
+      btn.appendChild(name);
+    }
+    els.lkTargets.appendChild(btn);
+  }
+}
+
+// 入力欄の keycode に合わせて、種類・切り替え先のボタンの印と、押せるかどうかを決める
+//   切り替え先 L0 は、TO のときだけ選べる(MO(0)・TG(0) は何もしない)
+function updateLayerPick() {
+  const p = parseKeycodeText(els.kcHex.value);
+  const lk = p.ok ? decodeLayerKey(p.code) : null;
+  const usable = canOperate();
+  const effectiveKind = lk ? lk.kind.name : lkindDefault;
+  els.lkKinds.querySelectorAll(".lk").forEach((b) => {
+    const on = lk !== null && b.dataset.kind === lk.kind.name;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  els.lkTargets.querySelectorAll(".lt").forEach((b) => {
+    const n = Number(b.dataset.n);
+    const on = lk !== null && lk.n === n;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    b.disabled = !usable || (n === 0 && effectiveKind !== "TO");
+  });
+}
+
+// 種類のボタン: 切り替え先は、いまの値を引き継ぐ(L0 は TO 以外で選べないので、そのときは L1)
+function onLayerKindClick(name) {
+  const kind = LAYER_KEY_KINDS.find((x) => x.name === name);
+  const p = parseKeycodeText(els.kcHex.value);
+  const cur = p.ok ? decodeLayerKey(p.code) : null;
+  let n = cur ? cur.n : ltargetDefault;
+  if (n === 0 && name !== "TO") n = Math.min(1, deviceLayers - 1);
+  if (n >= deviceLayers) n = deviceLayers - 1;
+  lkindDefault = name;
+  ltargetDefault = n;
+  els.kcHex.value = keycodeHex(kind.base + n);
+  updatePreview();
+}
+
+// 切り替え先のボタン: 種類は、いまの値を引き継ぐ(レイヤー切り替えでなければ、前に選んだ種類。はじめは MO)
+function onLayerTargetClick(n) {
+  const p = parseKeycodeText(els.kcHex.value);
+  const cur = p.ok ? decodeLayerKey(p.code) : null;
+  const kind = cur ? cur.kind : LAYER_KEY_KINDS.find((x) => x.name === lkindDefault);
+  lkindDefault = kind.name;
+  ltargetDefault = n;
+  els.kcHex.value = keycodeHex(kind.base + n);
+  updatePreview();
+}
+
 // 入力欄の keycode と同じボタンに、印を付ける
 //   修飾キー付き(Ctrl+↓ など)のときは、中のキー(↓)のボタンに印を付ける。修飾キーのチェックボックスも、ここで合わせる
 function markPicked() {
@@ -779,6 +899,7 @@ function markPicked() {
     b.setAttribute("aria-pressed", on ? "true" : "false");
   });
   updateModBoxes(ms);
+  if (pickKind === "layer") updateLayerPick();
 }
 
 /* ---- 修飾キーのチェックボックス(Ctrl・Shift・Alt・GUI) ---- */
@@ -1519,6 +1640,14 @@ function init() {
     const keep = curMs !== null && !curMs.isRight && nextMs !== null ? curMs.bits : 0;
     els.kcHex.value = keycodeHex(next | keep);
     updatePreview();
+  });
+  els.lkKinds.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".lk");
+    if (b && !b.disabled) onLayerKindClick(b.dataset.kind);
+  });
+  els.lkTargets.addEventListener("click", (ev) => {
+    const b = ev.target.closest(".lt");
+    if (b && !b.disabled) onLayerTargetClick(Number(b.dataset.n));
   });
   els.modBoxes.forEach((box) => box.addEventListener("change", onModToggle));
   els.kcHex.addEventListener("input", updatePreview);

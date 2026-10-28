@@ -338,7 +338,40 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 .kb.on { background: var(--sel-bg); border-color: var(--sel-edge); font-weight: 500; }
 .kb.on:disabled { background: var(--sel-bg); color: var(--ink); }
 
-/* 右の欄: いっしょに押すキー(修飾キーのチェックボックス) */
+/* レイヤー切り替え: 種類(MO・TG・TO)と切り替え先 */
+.lkinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
+.lk {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 4px;
+}
+.lk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.lk-title { font-size: 13px; font-weight: 500; }
+.lk-code { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.lk-desc { font-size: 11px; color: var(--ink-soft); }
+.lk.on { background: var(--sel-bg); border-color: var(--sel-edge); }
+.lk.on:disabled { background: var(--sel-bg); color: var(--ink); }
+.lk-label { margin-top: 12px; font-size: 12px; color: var(--muted); }
+.ltargets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.lt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 56px;
+  padding: 3px 8px;
+  border-bottom-width: 2px;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.lt-name { font-size: 10px; color: var(--muted); }
+.lt.on { background: var(--sel-bg); border-color: var(--sel-edge); font-weight: 500; }
+.lt.on:disabled { background: var(--sel-bg); color: var(--ink); }
+
+/* 右の欄: 同時に押すキー(修飾キーのチェックボックス) */
 .mods { margin: 0 0 12px; padding: 0; border: 0; display: flex; flex-wrap: wrap; gap: 0 16px; }
 .mods legend { width: 100%; padding: 0; margin-bottom: 2px; font-size: 12px; color: var(--muted); }
 .edit-grid .mods label { display: flex; align-items: center; gap: 6px; min-height: 30px; margin: 0; font-size: 13px; color: var(--ink); cursor: pointer; }
