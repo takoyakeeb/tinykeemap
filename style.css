@@ -110,6 +110,12 @@ select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .dirty-badge { font-size: 12px; font-weight: 500; color: var(--unsaved-ink); }
 
+/* 保存していない変更がある(saved=0)ときの帯。ボタンは置かない(上の1行の LOAD・SAVE を使う) */
+.unsaved-banner { background: #fbf3e4; border-bottom: 1px solid #f0e2c4; color: #7a4a0e; font-size: 12px; font-weight: 500; }
+.unsaved-banner[hidden] { display: none; }
+.unsaved-banner-inner { max-width: 1120px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 10px; }
+.unsaved-banner-inner::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--unsaved); display: inline-block; }
+
 /* 「…」メニューと、確認の小窓 */
 .popup {
   position: absolute;

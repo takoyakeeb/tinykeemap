@@ -264,6 +264,12 @@ function normalizeInfo(raw) {
     rows: toPositiveInt(raw, "rows"),
     cols: toPositiveInt(raw, "cols"),
     layers: toPositiveInt(raw, "layers"),
+    // 設定(CFG)に対応しているか。cfg=1 がない古いファームでは false(設定の面などを出さない)
+    cfg: raw.cfg === "1",
+    // レイヤー名の最大の文字数。cfg=1 のときだけある
+    lname: /^[0-9]+$/.test(raw.lname || "") ? Number(raw.lname) : 0,
+    // 1 = 保存済み、0 = 保存していない変更がある、null = 古いファーム(分からない)
+    saved: raw.saved === "1" ? 1 : raw.saved === "0" ? 0 : null,
   };
 }
 
@@ -352,6 +358,7 @@ const els = {
   btnSave: document.getElementById("btn-save"),
   btnLoad: document.getElementById("btn-load"),
   dirtyBadge: document.getElementById("dirty-badge"),
+  unsavedBanner: document.getElementById("unsaved-banner"),
   saveMsg: document.getElementById("save-msg"),
   log: document.getElementById("log"),
 };
@@ -495,6 +502,7 @@ function clearResults() {
   els.keymap.replaceChildren();
   els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
   model = null;
+  updateUnsavedBanner();
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
   renderPicker();
   els.kcHex.value = "";
@@ -548,10 +556,13 @@ function renderInfo(info, rawInfo, layoutResult) {
     ["キー数 (keys)", String(info.keys)],
     ["行 × 列 (rows × cols)", info.rows + " × " + info.cols],
     ["レイヤー数 (layers)", String(info.layers)],
+    ["設定 (cfg)", info.cfg ? "対応" : "なし"],
+    ["レイヤー名の最大の文字数 (lname)", info.cfg ? String(info.lname) : "-"],
+    ["保存 (saved)", info.saved === null ? "-" : info.saved === 1 ? "保存済み" : "保存していない変更あり"],
     ["機種定義 (配列)", describeLayout(layoutResult)],
   ];
   // 知らないキーも、将来の確認用にそのまま表示する
-  const known = new Set(["name", "proto", "fw", "keys", "rows", "cols", "layers"]);
+  const known = new Set(["name", "proto", "fw", "keys", "rows", "cols", "layers", "cfg", "lname", "saved"]);
   for (const k of Object.keys(rawInfo)) {
     if (!known.has(k)) rows.push([k, rawInfo[k]]);
   }
@@ -741,7 +752,7 @@ async function loadAll(startLayer) {
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0 };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -760,6 +771,7 @@ async function loadAll(startLayer) {
     // 最初の読み込みでは、今の内容を「保存済み」とみなす。再読み込みでは、前の基準を保つ
     if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
     refreshDirtyMarks();
+    updateUnsavedBanner();
     els.editPanel.hidden = false;
     renderPicker(); // レイヤー切り替えの欄に、レイヤー名(MAC・EDIT)を出すため、model を作ったあとにも作り直す
 
@@ -1322,6 +1334,11 @@ function refreshDirtyMarks() {
   els.dirtyBadge.textContent = n > 0 ? "● 未保存の変更 " + n : "";
 }
 
+// 「保存していない変更があります」の帯。キーボードが saved=0 と答えたときだけ出す(SAVE か LOAD が成功すると消える)
+function updateUnsavedBanner() {
+  els.unsavedBanner.hidden = !(model !== null && model.deviceUnsaved);
+}
+
 function showSaveMessage(kind, text) {
   els.saveMsg.className = "edit-msg " + kind; // kind: ok / fail / info
   els.saveMsg.textContent = text;
@@ -1394,7 +1411,7 @@ function showSaveError(cmd, e) {
     const detail = "ERR " + e.code + (e.message ? " " + e.message : "");
     if (e.code === "FLASH" && cmd === "SAVE") {
       msg = "保存に失敗しました(" + detail + ")。Flash の内容が壊れた可能性があり、次に電源を入れたとき初期キーマップに戻ることがあります。" +
-        "今のキーマップはキーボードの RAM に残っていて、そのまま使えます。原因を確認してから、もう一度「保存する」を試してください(自動では再試行しません)。";
+        "今のキーマップはキーボードの RAM に残っていて、そのまま使えます。原因を確認してから、もう一度「SAVE」を試してください(自動では再試行しません)。";
     } else if (e.code === "FLASH" && cmd === "LOAD") {
       msg = "読み直せませんでした(" + detail + ")。Flash に有効な保存データがありません。キーボードの内容は変わっていません。";
     } else if (e.code === "BADCMD") {
@@ -1416,7 +1433,7 @@ function showSaveError(cmd, e) {
 // 今のキーマップを Flash に保存する(1クリックにつき SAVE は1回だけ。自動で繰り返さない)
 async function doSave() {
   if (!canOperate()) return;
-  if (changedCount() === 0 && !window.confirm(
+  if (changedCount() === 0 && !model.deviceUnsaved && !window.confirm(
     "変更はありません(保存済みと同じ内容のはずです)。\nそれでも Flash に書き込みますか?\n\nFlash は書き換え回数に限りがあるので、必要なときだけ保存してください。")) return;
   busy = true;
   updateButtons();
@@ -1425,7 +1442,9 @@ async function doSave() {
   try {
     const r = await sendStateCommand("SAVE");
     baseline = copyCodes(model.codes);
+    model.deviceUnsaved = false;
     refreshDirtyMarks();
+    updateUnsavedBanner();
     showSaveMessage("ok", (r.late ? "応答は遅れましたが、" : "") + "保存しました。電源を入れ直しても、この内容で起動します。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
@@ -1441,6 +1460,7 @@ async function doLoad() {
   if (!canOperate()) return;
   const n = changedCount();
   if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n読み直すと、これらの変更は破棄されます。続けますか?")) return;
+  if (n === 0 && model.deviceUnsaved && !window.confirm("保存していない変更があります。\n読み直すと、破棄されます。続けますか?")) return;
   busy = true;
   updateButtons();
   clearSaveMessage();
@@ -1450,7 +1470,9 @@ async function doLoad() {
     const codes = await readAllCodes();
     applyCodes(codes);
     baseline = copyCodes(codes);
+    model.deviceUnsaved = false;
     refreshDirtyMarks();
+    updateUnsavedBanner();
     showSaveMessage("ok", "保存済みの内容を読み込みました。");
   } catch (e) {
     if (transport === null) return;
@@ -1473,7 +1495,7 @@ async function doReset() {
     const codes = await readAllCodes();
     applyCodes(codes);
     showSaveMessage("ok", "初期キーマップに戻しました。まだ保存していません。" +
-      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す」を押してください。" : ""));
+      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「LOAD」を押してください。" : ""));
   } catch (e) {
     if (transport === null) return;
     showSaveError("RESET", e);
@@ -1664,7 +1686,7 @@ function setDirectOpen(open) {
 function askReset() {
   if (!canOperate()) return;
   const n = changedCount();
-  els.resetConfirmText.textContent = "「保存する」を押すまでは、キーボードの保存内容は変わりません。" +
+  els.resetConfirmText.textContent = "「SAVE」を押すまでは、キーボードの保存内容は変わりません。" +
     (n > 0 ? "\n未保存の変更 " + n + " キーは、破棄されます。" : "");
   els.resetConfirm.hidden = false;
   els.resetCancel.focus();

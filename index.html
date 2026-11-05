@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- 上の1行: 接続の点、未保存の変更の数、読み直す、保存する、「…」メニュー -->
+  <!-- 上の1行: 接続の点、未保存の変更の数、LOAD、SAVE、「…」メニュー -->
   <header class="topbar">
     <div class="topbar-inner">
       <h1 class="brand">tinykeemap</h1>
@@ -19,8 +19,8 @@
       <div class="spacer"></div>
       <span id="dirty-badge" class="dirty-badge" role="status"></span>
       <a id="link-readme" class="topbar-link" href="https://github.com/takoyakeeb/tinykeemap/blob/main/README.md">README</a>
-      <button id="btn-load" class="btn-text" type="button" disabled title="キーボードに保存した内容を読み直します。未保存の変更は破棄されます">読み直す</button>
-      <button id="btn-save" class="btn-primary" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">保存する</button>
+      <button id="btn-load" class="btn-text" type="button" disabled title="キーボードに保存した内容を読み直します。保存していない変更は破棄されます">LOAD</button>
+      <button id="btn-save" class="btn-primary" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">SAVE</button>
       <button id="btn-menu" class="btn-icon" type="button" aria-label="その他" aria-haspopup="menu" aria-expanded="false">···</button>
 
       <div id="menu" class="popup menu" role="menu" hidden>
@@ -29,7 +29,7 @@
         <button id="menu-layout-clear" type="button" role="menuitem" hidden>読み込んだ配列を消す</button>
         <button id="menu-direct" type="button" role="menuitem" aria-expanded="false" disabled title="keycode を名前や16進で入力します(開発者向け)">keycode を直接入力…</button>
         <button id="menu-detail" type="button" role="menuitem" aria-expanded="false">デバイス情報・通信ログ</button>
-        <button id="menu-reload" type="button" role="menuitem" disabled title="キーボードから、いまの内容を読み込み直します(保存済みの内容を読む「読み直す」とは別です)">再読み込み</button>
+        <button id="menu-reload" type="button" role="menuitem" disabled title="キーボードから、いまの内容を読み込み直します(保存済みの内容を読む「LOAD」とは別です)">再読み込み</button>
         <button id="menu-disconnect" type="button" role="menuitem" disabled>切断する</button>
       </div>
 
@@ -43,6 +43,11 @@
       </div>
     </div>
   </header>
+
+  <!-- 接続したとき、キーボードが「保存していない変更がある」と答えたときの帯(saved=0)。ボタンは置かない -->
+  <div id="unsaved-banner" class="unsaved-banner" role="status" hidden>
+    <div class="unsaved-banner-inner">保存していない変更があります</div>
+  </div>
 
   <input id="layout-file" type="file" accept=".json,application/json" hidden>
 
@@ -126,7 +131,7 @@
             <button id="btn-set" type="button" disabled>変更する</button>
             <button id="btn-revert" class="btn-text" type="button" hidden title="このキーを、読み込んだ値・保存した値に戻します">元に戻す</button>
           </div>
-          <p class="hint save-note">「保存する」までは、USBを抜くと元に戻ります。</p>
+          <p class="hint save-note">すぐ反映されます。「SAVE」を押すと保存されます。</p>
         </div>
       </div>
       <!-- 「…」メニューの「keycode を直接入力…」で開く(開発者向け) -->
