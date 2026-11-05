@@ -330,8 +330,15 @@ function detectOs() {
   return "other";
 }
 
-// いま使っている表記の OS(いまは、自動判別だけ。「自動 / Mac / Windows」の切り替えは、設定の面で足す)
+// 表記の選び方("auto": ブラウザの OS で決める / "mac" / "win")と、いま使っている表記の OS("mac" / "win" / "other")。
+// 選び方は、設定の面で切り替える(app.js が、ブラウザに保存する)
+let notationMode = "auto";
 let notationOs = detectOs();
+
+function setNotationMode(mode) {
+  notationMode = mode === "mac" || mode === "win" ? mode : "auto";
+  notationOs = notationMode === "auto" ? detectOs() : notationMode;
+}
 
 // 修飾キー(MOD_KINDS の項目)の、画面に出す名前
 function modLabel(kind) {

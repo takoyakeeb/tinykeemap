@@ -1226,7 +1226,7 @@ const LED_PALETTE = [
 ];
 
 // 設定の面の部品(buildSettings が作る)
-const setUi = { built: false, chips: [], range: null, val: null, layers: [], open: -1 };
+const setUi = { built: false, chips: [], ranges: {}, rotChips: [], notChips: [], layers: [], open: -1 };
 
 // 小さな部品を作る
 function makeEl(tag, cls, text) {
@@ -1308,17 +1308,19 @@ function sendLive(name, value) {
   return st.promise;
 }
 
-function onLedInput() {
-  const v = Number(setUi.range.value);
-  setUi.val.textContent = v + "%";
-  sendLive("led", v).catch(cfgFail); // 動かしている間も、LED が変わる
+// スライダー(led・oled)を動かしている間と、離したとき
+function onRangeInput(name) {
+  const r = setUi.ranges[name];
+  const v = Number(r.range.value);
+  r.val.textContent = v + "%";
+  sendLive(name, v).catch(cfgFail); // 動かしている間も、LED や OLED が変わる
 }
 
-async function onLedChange() {
+async function onRangeChange(name) {
   try {
     clearSaveMessage();
-    await sendLive("led", Number(setUi.range.value));
-    model.cfg.values.led = await cfgGet("led");
+    await sendLive(name, Number(setUi.ranges[name].range.value));
+    model.cfg.values[name] = await cfgGet(name);
     syncSettings();
     await tryRefreshSaved();
   } catch (e) {
@@ -1326,12 +1328,10 @@ async function onLedChange() {
   }
 }
 
-// LED の節を、初期値に戻す(効果・明るさ・色)。キーボードの RAM だけ。SAVE するまで保存されない
-async function resetLed() {
+// 設定を、名前ごとに初期値に戻す(値なしで送って、実際の値を読み直す)。キーボードの RAM だけ。SAVE するまで保存されない
+async function resetCfg(names) {
   try {
     clearSaveMessage();
-    const names = ["led", "led_mode"];
-    for (let l = 0; l < model.info.layers; l++) names.push("lcolor" + l);
     for (const name of names) {
       if (!model.cfg.names.includes(name)) continue;
       await cfgSet(name);
@@ -1344,6 +1344,12 @@ async function resetLed() {
   }
 }
 
+function resetLed() {
+  const names = ["led", "led_mode"];
+  for (let l = 0; l < model.info.layers; l++) names.push("lcolor" + l);
+  return resetCfg(names);
+}
+
 // 色の丸を押したとき: そのレイヤーのパレットを開く(ほかは閉じる)
 function toggleLedPalette(l) {
   setUi.open = setUi.open === l ? -1 : l;
@@ -1354,13 +1360,92 @@ function toggleLedPalette(l) {
   });
 }
 
+const OLED_ROTATIONS = [0, 90, 180, 270]; // 向き。ツールが知っている(CFG LIST の候補にはない)
+const NOTATION_KEY = "tinykeemap.notation";
+
+// 名前つきのスライダーを作る。戻り値は、節に足す部品([ラベル, 行])
+function makeRange(name, labelText, min, max, hint) {
+  const label = makeEl("div", "set-label");
+  const lab = makeEl("label", "", labelText);
+  lab.htmlFor = "set-" + name;
+  label.append(lab, makeEl("span", "set-range-hint", hint));
+  const row = makeEl("div", "set-range");
+  const range = document.createElement("input");
+  range.type = "range";
+  range.id = "set-" + name;
+  range.min = String(min);
+  range.max = String(max);
+  range.step = String(LED_STEP);
+  range.addEventListener("input", () => onRangeInput(name));
+  range.addEventListener("change", () => onRangeChange(name));
+  const val = makeEl("span", "set-val");
+  row.append(range, val);
+  setUi.ranges[name] = { range, val, min, max };
+  return [label, row];
+}
+
+// 向きのボタンに付ける、回した基板の小さな絵(0° は USB-C が上)
+function makeBoardIcon(deg) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "22");
+  svg.setAttribute("height", "28");
+  svg.setAttribute("viewBox", "0 0 28 28");
+  svg.setAttribute("aria-hidden", "true");
+  const g = document.createElementNS(ns, "g");
+  g.setAttribute("transform", "rotate(" + deg + " 14 14)");
+  const body = document.createElementNS(ns, "rect");
+  for (const [k, val] of [["x", "8"], ["y", "3"], ["width", "12"], ["height", "22"], ["rx", "2"], ["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "1.5"]]) body.setAttribute(k, val);
+  const usb = document.createElementNS(ns, "rect");
+  for (const [k, val] of [["x", "11"], ["y", "3"], ["width", "6"], ["height", "3"], ["fill", "currentColor"]]) usb.setAttribute(k, val);
+  g.append(body, usb);
+  svg.append(g);
+  return svg;
+}
+
+// キーの表記を切り替える("auto" / "mac" / "win")。ブラウザに保存する(使えないときは、このページを開いている間だけ)
+function setNotation(mode) {
+  setNotationMode(mode);
+  try {
+    localStorage.setItem(NOTATION_KEY, notationMode);
+  } catch (e) {
+    /* 保存できなくても、このページを閉じるまでは使える */
+  }
+  refreshNotation();
+  syncSettings();
+}
+
+// 保存してある表記の選び方を、起動したときに読む
+function loadNotation() {
+  try {
+    const saved = localStorage.getItem(NOTATION_KEY);
+    if (saved) setNotationMode(saved);
+  } catch (e) {
+    /* 読めなければ、自動 */
+  }
+}
+
+// 表記が変わったとき、表記を使っているところを、すべて作り直す
+function refreshNotation() {
+  updateModLabels();
+  if (model) {
+    model.caps.forEach((row, l) => row.forEach((cap, i) => {
+      if (cap) fillCap(cap, l, i, model.codes[l][i]);
+    }));
+    refreshDirtyMarks();
+  }
+  updatePreview();
+  renderPicker();
+}
+
 // 設定の面を、いまの設定(model.cfg)から作る。入るたびと、LOAD のあとに作り直す
 function buildSettings() {
   const cfg = model.cfg;
   els.settingsBody.replaceChildren();
   setUi.chips = [];
-  setUi.range = null;
-  setUi.val = null;
+  setUi.ranges = {};
+  setUi.rotChips = [];
+  setUi.notChips = [];
   setUi.layers = [];
   setUi.open = -1;
   const has = (name) => cfg.names.includes(name);
@@ -1392,27 +1477,7 @@ function buildSettings() {
   }
 
   // 明るさ
-  if (has("led")) {
-    const label = makeEl("div", "set-label");
-    const lab = makeEl("label", "", "明るさ");
-    lab.htmlFor = "set-led";
-    label.append(lab, makeEl("span", "set-range-hint", LED_MIN + "% 〜 " + LED_MAX + "%"));
-    sec.append(label);
-    const row = makeEl("div", "set-range");
-    const range = document.createElement("input");
-    range.type = "range";
-    range.id = "set-led";
-    range.min = String(LED_MIN);
-    range.max = String(LED_MAX);
-    range.step = String(LED_STEP);
-    range.addEventListener("input", onLedInput);
-    range.addEventListener("change", onLedChange);
-    const val = makeEl("span", "set-val");
-    row.append(range, val);
-    sec.append(row);
-    setUi.range = range;
-    setUi.val = val;
-  }
+  if (has("led")) sec.append(...makeRange("led", "明るさ", LED_MIN, LED_MAX, LED_MIN + "% 〜 " + LED_MAX + "%"));
 
   // レイヤーごとの色
   const colorLayers = [];
@@ -1472,6 +1537,58 @@ function buildSettings() {
   }
 
   els.settingsBody.append(sec);
+
+  // OLED
+  if (has("oled") || has("rotate")) {
+    const osec = makeEl("section", "set-sec");
+    osec.setAttribute("aria-label", "OLED");
+    const ohead = makeEl("div", "set-sec-head");
+    ohead.append(makeEl("h3", "", "OLED"));
+    const oreset = makeEl("button", "btn-line", "初期値に戻す");
+    oreset.type = "button";
+    oreset.addEventListener("click", () => resetCfg(["oled", "rotate"]));
+    ohead.append(oreset);
+    osec.append(ohead);
+    if (has("oled")) osec.append(...makeRange("oled", "明るさ", 0, 100, "0% 〜 100%(0% は消灯)"));
+    if (has("rotate")) {
+      osec.append(makeEl("div", "set-label", "向き(回転)"));
+      const chips = makeEl("div", "set-chips");
+      for (const deg of OLED_ROTATIONS) {
+        const b = makeEl("button", "set-chip set-rot");
+        b.type = "button";
+        b.dataset.value = String(deg);
+        b.append(makeBoardIcon(deg), document.createTextNode(deg + "°"));
+        b.addEventListener("click", () => { if (cfg.values.rotate !== String(deg)) setCfg("rotate", String(deg)); });
+        chips.append(b);
+        setUi.rotChips.push(b);
+      }
+      osec.append(chips);
+    }
+    els.settingsBody.append(osec);
+  }
+
+  // キーの表記(ブラウザに保存。キーボードには書かない)
+  const nsec = makeEl("section", "set-sec");
+  nsec.setAttribute("aria-label", "表記");
+  nsec.append(makeEl("h3", "", "キーの表記"));
+  const nchips = makeEl("div", "set-chips");
+  nchips.style.marginTop = "14px";
+  const autoName = { mac: "Mac", win: "Windows", other: "その他" }[detectOs()];
+  for (const [mode, text] of [["auto", "自動(" + autoName + ")"], ["mac", "Mac"], ["win", "Windows"]]) {
+    const b = makeEl("button", "set-chip", text);
+    b.type = "button";
+    b.dataset.value = mode;
+    b.addEventListener("click", () => setNotation(mode));
+    nchips.append(b);
+    setUi.notChips.push(b);
+  }
+  nsec.append(nchips);
+  const sample = makeEl("div", "set-sample");
+  const tag = (t) => makeEl("span", "set-tag", t);
+  sample.append(tag("GUI"), makeEl("span", "", "→"), makeEl("span", "", "Mac"), tag("⌘ / Cmd"), makeEl("span", "set-sample-gap", "Windows"), tag("Win"));
+  nsec.append(sample);
+  els.settingsBody.append(nsec);
+
   setUi.built = true;
   syncSettings();
   updateSettingsControls();
@@ -1482,13 +1599,14 @@ function syncSettings() {
   if (!setUi.built || !model || !model.cfg) return;
   const v = model.cfg.values;
   for (const b of setUi.chips) b.setAttribute("aria-pressed", b.dataset.value === v.led_mode ? "true" : "false");
-  if (setUi.range) {
-    const led = Number(v.led);
-    if (Number.isFinite(led) && v.led !== "") {
-      if (document.activeElement !== setUi.range) setUi.range.value = String(Math.min(LED_MAX, Math.max(LED_MIN, led)));
-      setUi.val.textContent = led + "%";
-    }
+  for (const [name, r] of Object.entries(setUi.ranges)) {
+    const n = Number(v[name]);
+    if (!Number.isFinite(n) || v[name] === "") continue;
+    if (document.activeElement !== r.range) r.range.value = String(Math.min(r.max, Math.max(r.min, n)));
+    r.val.textContent = n + "%";
   }
+  for (const b of setUi.rotChips) b.setAttribute("aria-pressed", b.dataset.value === v.rotate ? "true" : "false");
+  for (const b of setUi.notChips) b.setAttribute("aria-pressed", b.dataset.value === notationMode ? "true" : "false");
   setUi.layers.forEach((row, l) => {
     if (!row) return;
     const hex = (v["lcolor" + l] || "").toUpperCase();
@@ -2298,6 +2416,7 @@ function init() {
   els.btnSettings.addEventListener("click", () => setView(model && model.view === "settings" ? "keymap" : "settings"));
   els.btnSettingsBack.addEventListener("click", () => setView("keymap"));
   // 編集欄
+  loadNotation();
   updateModLabels();
   renderPicker();
   els.kcSearch.addEventListener("input", renderPicker);

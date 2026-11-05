@@ -540,3 +540,7 @@ body.is-off #dirty-badge { display: none; }
 .set-hex .hash { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .set-hex input { width: 72px; height: 26px; padding: 0 6px; border: 1px solid var(--line-key); border-radius: 3px; background: #fff; color: var(--ink); font: 12px var(--mono); text-transform: uppercase; }
 @media (max-width: 560px) { .set-pal { margin-left: 0; max-width: 100%; grid-template-columns: repeat(6, 28px); } }
+.set-rot { height: 40px; display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); }
+.set-sample { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12px; color: var(--ink-soft); }
+.set-sample-gap { margin-left: 8px; }
+.set-tag { display: inline-block; padding: 0 7px; border: 1px solid #e4e5de; border-bottom-width: 2px; border-radius: 4px; background: #fffffd; font-size: 12px; line-height: 22px; }
