@@ -311,6 +311,39 @@ const MOD_KINDS = [
   { bit: 0x0800, label: "GUI", left: "LGUI", right: "RGUI", short: "G" },
 ];
 
+// ---- 修飾キーの表記(OS ごと。画面に出す文字だけ。内部の名前 LGUI などと、直接入力の書き方は変えない) ----
+// Mac: Option・Cmd(小さいマスは記号 ⌃⇧⌥⌘)。Windows: Alt・Win。Linux・不明: Alt・GUI。小さいマスは、Mac 以外は文字。
+const MOD_NOTATION = {
+  mac:   { Ctrl: "Ctrl", Shift: "Shift", Alt: "Option", GUI: "Cmd" },
+  win:   { Ctrl: "Ctrl", Shift: "Shift", Alt: "Alt", GUI: "Win" },
+  other: { Ctrl: "Ctrl", Shift: "Shift", Alt: "Alt", GUI: "GUI" },
+};
+const MOD_SYMBOL_MAC = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", GUI: "⌘" };
+
+// ブラウザの OS を、"mac" / "win" / "other" で返す
+function detectOs() {
+  if (typeof navigator === "undefined") return "other";
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  const text = platform + " " + (navigator.userAgent || "");
+  if (/mac/i.test(platform) || (!platform && /Macintosh/i.test(text))) return "mac";
+  if (/win/i.test(platform) || (!platform && /Windows/i.test(text))) return "win";
+  return "other";
+}
+
+// いま使っている表記の OS(いまは、自動判別だけ。「自動 / Mac / Windows」の切り替えは、設定の面で足す)
+let notationOs = detectOs();
+
+// 修飾キー(MOD_KINDS の項目)の、画面に出す名前
+function modLabel(kind) {
+  return MOD_NOTATION[notationOs][kind.label];
+}
+
+// 小さいマス(1行)で使う、修飾キーの短い表記と、つなぎ方
+function modCompact(kinds) {
+  if (notationOs === "mac") return kinds.map((m) => MOD_SYMBOL_MAC[m.label]).join("");
+  return kinds.map((m) => modLabel(m) + "+").join("");
+}
+
 // 入力で使える書き方 → { kind, isRight }。LSFT / S は左側、RSFT は右側
 const MOD_WRAPPER_BY_NAME = new Map();
 for (const m of MOD_KINDS) {
@@ -334,7 +367,7 @@ function describeModified(code) {
   let name = base.name;
   for (let i = mods.length - 1; i >= 0; i--) name = (isRight ? mods[i].right : mods[i].left) + "(" + name + ")";
   // 「Ctrl+Shift+A」の形(右側は「右Ctrl+右Shift+A」)
-  const text = mods.map((m) => (isRight ? "右" : "") + m.label).concat([base.label]).join("+");
+  const text = mods.map((m) => (isRight ? "右" : "") + modLabel(m)).concat([base.label]).join("+");
   return { code, name, alias: "", label: text, cap: text, group: "modified", warn: "" };
 }
 
@@ -423,10 +456,6 @@ const CAP_SHORT = new Map([
 const CAP_LAYER_SMALL = { MO: "押す間", TG: "切替", TO: "移動" };
 const CAP_LAYER_ARROW = { MO: "↓", TG: "⇄", TO: "→" };
 
-// 修飾キーの記号(1行にするとき)。GUI は、2段のときと表記をそろえて「GUI」と書く(10/27の決定)。
-// ⌘ にするかは、OS の判別と一緒に②で見直す
-const CAP_MOD_SYMBOL = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", GUI: "GUI" };
-
 function capBaseName(code) {
   const k = KEYCODE_BY_CODE.get(code);
   if (!k) return keycodeHex(code);
@@ -464,8 +493,8 @@ function capFace(code, compact) {
   const mod = splitModified(code);
   if (mod) {
     const base = capBaseName(mod.baseCode);
-    if (compact) return { small: "", main: mod.mods.map((m) => CAP_MOD_SYMBOL[m.label]).join("") + base, kind: "normal" };
-    return { small: mod.mods.map((m) => (mod.isRight ? "右" : "") + m.label).join(" "), main: base, kind: "normal" };
+    if (compact) return { small: "", main: modCompact(mod.mods) + base, kind: "normal" };
+    return { small: mod.mods.map((m) => (mod.isRight ? "右" : "") + modLabel(m)).join(" "), main: base, kind: "normal" };
   }
   const k = KEYCODE_BY_CODE.get(code);
   if (!k) return { small: "", main: keycodeHex(code), kind: "normal" }; // 一覧にない値だけは、16進で出す
@@ -473,7 +502,7 @@ function capFace(code, compact) {
     // 修飾キー単体: 「左 GUI(Windows / Super キー)」→ 上に「左」、下に「GUI」
     const kind = MOD_KINDS[(code - 0x00e0) & 3];
     const side = code >= 0x00e4 ? "右" : "左";
-    return compact ? { small: "", main: side + kind.label, kind: "normal" } : { small: side, main: kind.label, kind: "normal" };
+    return compact ? { small: "", main: side + modLabel(kind), kind: "normal" } : { small: side, main: modLabel(kind), kind: "normal" };
   }
   if (k.group === "keypad" && k.label.startsWith("テンキー ")) {
     const rest = k.label.slice("テンキー ".length);

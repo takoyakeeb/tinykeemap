@@ -1047,6 +1047,14 @@ function modState(code) {
   return null;
 }
 
+// チェックボックスの横の名前を、いまの表記(Mac は Option・Cmd など)にする
+function updateModLabels() {
+  for (const span of document.querySelectorAll("#mod-box [data-mod-label]")) {
+    const kind = MOD_KINDS.find((m) => m.bit === Number(span.dataset.modLabel));
+    if (kind) span.textContent = modLabel(kind);
+  }
+}
+
 // チェックボックスを、入力欄の keycode に合わせる。付けられるのは、基本キーだけ。
 // 右側の修飾キー付き(RSFT(KC_A) など)は、チェックの状態だけ見せて、触れなくする(直接入力で変える)
 function updateModBoxes(ms) {
@@ -1784,6 +1792,7 @@ function init() {
   els.reload.addEventListener("click", () => loadAll(model ? model.current : 0));
   els.disconnect.addEventListener("click", disconnect);
   // 編集欄
+  updateModLabels();
   renderPicker();
   els.kcSearch.addEventListener("input", renderPicker);
   els.kindKey.addEventListener("click", () => { pickKind = "key"; renderPicker(); });
