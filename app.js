@@ -321,6 +321,7 @@ const els = {
   menuDetail: document.getElementById("menu-detail"),
   menuDirect: document.getElementById("menu-direct"),
   kcDirect: document.getElementById("kc-direct"),
+  menuShare: document.getElementById("menu-share"),
   menuLayout: document.getElementById("menu-layout"),
   menuLayoutClear: document.getElementById("menu-layout-clear"),
   layoutFile: document.getElementById("layout-file"),
@@ -470,6 +471,7 @@ function canOperate() {
 function updateSaveControls() {
   const usable = canOperate();
   els.btnSave.disabled = !usable;
+  els.menuShare.disabled = !usable;
   els.menuLayout.disabled = !usable;
   els.menuLayoutClear.hidden = !(model !== null && model.custom !== null);
   els.menuLayoutClear.disabled = !usable;
@@ -2323,6 +2325,99 @@ async function clearCustomLayout() {
   if (model !== null) showSaveMessage("ok", "読み込んだ配列を消しました。");
 }
 
+/* ---- リンクで共有(#k1=...) ---- */
+// 形: #k1=<base64url>。入れるのは、機種名・レイヤー数・キー数・全レイヤーの keycode だけ(設定は入れない)。
+//   バイト列: [機種名の長さ 1][機種名(UTF-8)][レイヤー数 1][キー数 2(上位が先)][keycode 2バイトずつ(上位が先)。レイヤー順、index 順]
+//   形を変えるときは、k2 にする(k1 は、そのまま読めるようにしておく)。
+
+function bytesToBase64Url(bytes) {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(text) {
+  if (!/^[A-Za-z0-9_-]*$/.test(text)) throw new Error("リンクの文字が正しくありません");
+  let b64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// { name, layers, keys, codes: [レイヤー][index] } → "k1=..."
+function encodeShare(share) {
+  const nameBytes = new TextEncoder().encode(share.name);
+  if (nameBytes.length === 0 || nameBytes.length > 255) throw new Error("機種名の長さが正しくありません");
+  if (share.layers < 1 || share.layers > 255 || share.keys < 1 || share.keys > 65535) throw new Error("レイヤー数・キー数が範囲外です");
+  const bytes = [nameBytes.length, ...nameBytes, share.layers, share.keys >> 8, share.keys & 0xff];
+  for (let l = 0; l < share.layers; l++) {
+    for (let i = 0; i < share.keys; i++) {
+      const code = share.codes[l][i];
+      if (!Number.isInteger(code) || code < 0 || code > 0xffff) throw new Error("keycode が範囲外です");
+      bytes.push(code >> 8, code & 0xff);
+    }
+  }
+  return "k1=" + bytesToBase64Url(bytes);
+}
+
+// "k1=..." の「=」のあと(base64url)を読む。読めないときは、Error(理由)
+function decodeShare(b64) {
+  const bytes = base64UrlToBytes(b64);
+  const bad = () => new Error("リンクの内容が正しくありません");
+  if (bytes.length < 1) throw bad();
+  const nameLen = bytes[0];
+  let pos = 1 + nameLen;
+  if (nameLen === 0 || bytes.length < pos + 3) throw bad();
+  let name;
+  try {
+    name = new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(1, pos));
+  } catch (e) {
+    throw bad();
+  }
+  const layers = bytes[pos];
+  const keys = (bytes[pos + 1] << 8) | bytes[pos + 2];
+  pos += 3;
+  if (layers < 1 || keys < 1 || bytes.length !== pos + layers * keys * 2) throw bad();
+  const codes = [];
+  for (let l = 0; l < layers; l++) {
+    const row = [];
+    for (let i = 0; i < keys; i++) {
+      row.push((bytes[pos] << 8) | bytes[pos + 1]);
+      pos += 2;
+    }
+    codes.push(row);
+  }
+  return { name, layers, keys, codes };
+}
+
+// いまのキーボードのキーマップ(未保存の変更も含む)を、リンクにする
+function buildShareUrl() {
+  const info = model.info;
+  const part = encodeShare({ name: info.name, layers: info.layers, keys: info.keys, codes: model.codes });
+  return pageUrl() + "#" + part;
+}
+
+// 「…」メニューの「リンクをコピー」
+async function copyShareLink() {
+  if (!canOperate()) return;
+  clearError();
+  let url;
+  try {
+    url = buildShareUrl();
+  } catch (e) {
+    showSaveMessage("fail", "リンクを作れませんでした: " + e.message);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showSaveMessage("ok", "リンクをコピーしました。");
+  } catch (e) {
+    showSaveMessage("info", "コピーできませんでした。次のリンクを、手で選んでコピーしてください。\n" + url); // 許可されていないとき、など
+  }
+}
+
 /* ---- 上の1行: 「…」メニューと、確認の小窓 ---- */
 
 let detailOpen = false;
@@ -2380,6 +2475,7 @@ function initTopBar() {
   els.menuReset.addEventListener("click", askReset);
   els.menuDetail.addEventListener("click", () => setDetailOpen(!detailOpen));
   els.menuDirect.addEventListener("click", () => setDirectOpen(els.kcDirect.hidden));
+  els.menuShare.addEventListener("click", copyShareLink);
   els.menuLayout.addEventListener("click", askLayoutFile);
   els.menuLayoutClear.addEventListener("click", clearCustomLayout);
   els.layoutFile.addEventListener("change", onLayoutFileChosen);
