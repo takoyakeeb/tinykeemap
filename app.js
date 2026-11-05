@@ -1306,7 +1306,7 @@ async function commitLayerName(l, text) {
   try {
     await cfgSet(key, text);
     model.cfg.values[key] = await cfgGet(key); // 実際の値を読み直す(空にしたときは、初期値)
-    await refreshSaved();
+    await tryRefreshSaved();
   } catch (e) {
     if (transport === null) return;
     if (e instanceof ProtocolError && e.code === "BADARG") showSaveMessage("fail", "この名前は使えません(ERR " + e.code + (e.message ? " " + e.message : "") + ")。");
@@ -1324,6 +1324,16 @@ async function refreshSaved() {
   const info = normalizeInfo(parseInfoData((await request("INFO")).data));
   model.deviceUnsaved = info.saved === 0;
   updateUnsavedBanner();
+}
+
+// refreshSaved の、失敗しても投げない版。変更そのものは成功しているので、読み直せなくても、成功を失敗に見せない
+// (通信が止まっていれば、次のコマンドで分かる)
+async function tryRefreshSaved() {
+  try {
+    await refreshSaved();
+  } catch (e) {
+    if (transport !== null) log("bad", "! saved を読み直せませんでした: " + e.message);
+  }
 }
 
 // 名前と「空」と ● を更新する。名前は layerName の名前。名前がなくて、中身がすべて「透過」なら「空」
@@ -1475,6 +1485,7 @@ async function doEdit(isRevert) {
     model.codes[layer][index] = code;
     fillCap(cap, layer, index, code);
     refreshDirtyMarks();
+    await tryRefreshSaved(); // 帯を、キーボードの答え(saved)に合わせる
     showEditMessage("ok", isRevert ? where + " を元に戻しました。" : where + " を " + keyName(code) + " に変更しました。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
@@ -1731,6 +1742,7 @@ async function doReset() {
     await sendStateCommand("RESET");
     const codes = await readAllCodes();
     applyCodes(codes);
+    await tryRefreshSaved();
     showSaveMessage("ok", "初期キーマップに戻しました。まだ保存していません。" +
       (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「LOAD」を押してください。" : ""));
   } catch (e) {
@@ -1832,7 +1844,9 @@ async function connect() {
 async function disconnect() {
   if (!transport) return;
   const n = changedCount();
-  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n切断してもキーボードには残りますが、保存はされません。また、このツールでは「未保存」かどうか分からなくなります。切断しますか?")) return;
+  const unsaved = n > 0 || (model !== null && model.deviceUnsaved);
+  // つなぎ直すと、キーボードの saved で、帯がまた出る。切断しても、キーボードには残る
+  if (unsaved && !window.confirm((n > 0 ? "未保存の変更が " + n + " キーあります。" : "保存していない変更があります。") + "\n切断してもキーボードには残りますが、保存はされません。切断しますか?")) return;
   await transport.close();
 }
 
