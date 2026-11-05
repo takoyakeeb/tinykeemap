@@ -548,6 +548,83 @@ async function doRequest(command, timeoutMs) {
   return parseResponse(line);
 }
 
+/* ---- 設定(CFG。protocol.md §4) ---- */
+
+// "lname0 led led_mode=layer|press|breathe|off ..." → [{ name, options }]
+// options は、候補の配列。候補のない名前(自由な値)は null
+function parseCfgList(data) {
+  const out = [];
+  for (const token of data.split(/\s+/)) {
+    if (!token) continue;
+    const eq = token.indexOf("=");
+    if (eq < 0) out.push({ name: token, options: null });
+    else if (eq > 0) out.push({ name: token.slice(0, eq), options: token.slice(eq + 1).split("|").filter(Boolean) });
+  }
+  return out;
+}
+
+// 通信に入れてよい名前と値(空白や改行を入れると、別のコマンドになってしまうため)
+function checkCfgToken(text, what) {
+  if (!/^[A-Za-z0-9_,-]+$/.test(text)) throw new Error("設定の" + what + "に使えない文字があります: " + text);
+}
+
+// 設定の値を読む(値が空のときは "")
+async function cfgGet(name) {
+  checkCfgToken(name, "名前");
+  const resp = await request("CFG GET " + name);
+  return resp.data;
+}
+
+// 設定を書き換える(RAM だけ。確定は SAVE)。値を省く(undefined か "")と、初期値に戻る
+async function cfgSet(name, value) {
+  checkCfgToken(name, "名前");
+  if (value === undefined || value === "") {
+    await request("CFG SET " + name);
+    return;
+  }
+  const text = String(value);
+  checkCfgToken(text, "値");
+  await request("CFG SET " + name + " " + text);
+}
+
+// 設定の名前の一覧と、いまの値を、すべて読む
+//   戻り値: { names: [名前...], options: { 名前: [候補...] }, values: { 名前: 値 } }
+async function readCfgAll() {
+  const list = parseCfgList((await request("CFG LIST")).data);
+  const cfg = { names: [], options: {}, values: {} };
+  for (const item of list) {
+    cfg.names.push(item.name);
+    if (item.options) cfg.options[item.name] = item.options;
+    cfg.values[item.name] = await cfgGet(item.name);
+  }
+  return cfg;
+}
+
+// readCfgAll の、ERR で失敗したときは null を返す版(通信が切れたなどは、そのまま投げる)
+async function tryReadCfg() {
+  try {
+    return await readCfgAll();
+  } catch (e) {
+    if (e instanceof ProtocolError) {
+      log("bad", "! 設定を読めませんでした: ERR " + e.code + (e.message ? " " + e.message : ""));
+      return null;
+    }
+    throw e;
+  }
+}
+
+// 「デバイス情報」に、設定の名前を1行足す(確認用)
+function renderCfgInfoRow(cfg) {
+  const old = els.info.querySelector("[data-cfg-row]");
+  if (old) { old.previousElementSibling.remove(); old.remove(); }
+  const dt = document.createElement("dt");
+  dt.textContent = "設定の名前 (CFG LIST)";
+  const dd = document.createElement("dd");
+  dd.dataset.cfgRow = "1";
+  dd.textContent = cfg ? cfg.names.length + " 個: " + cfg.names.join(" ") : "-";
+  els.info.append(dt, dd);
+}
+
 function renderInfo(info, rawInfo, layoutResult) {
   els.info.replaceChildren();
   const rows = [
@@ -755,7 +832,7 @@ async function loadAll(startLayer) {
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0 };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -763,6 +840,12 @@ async function loadAll(startLayer) {
       const codes = parseDumpData(resp.data, info.keys);
       model.codes[layer] = codes;
       renderLayer(layer, codes, info);
+    }
+    // 設定(cfg=1 のファームだけ)。読めなかったときは、設定の機能を使わない
+    if (info.cfg) {
+      model.cfg = await tryReadCfg();
+      renderCfgInfoRow(model.cfg);
+      if (!model.cfg) warnings.push("設定を読めませんでした。設定の機能は使えません。");
     }
     buildTabs();
     // 再読み込みや配列の読み込みでは、見ているレイヤーを保つ(接続したときは、レイヤー 0)
@@ -1518,6 +1601,10 @@ async function doLoad() {
     await sendStateCommand("LOAD");
     const codes = await readAllCodes();
     applyCodes(codes);
+    if (model.info.cfg) {
+      model.cfg = await tryReadCfg();
+      renderCfgInfoRow(model.cfg);
+    }
     baseline = copyCodes(codes);
     model.deviceUnsaved = false;
     refreshDirtyMarks();
