@@ -469,6 +469,7 @@ main > .edit-msg { margin-top: 16px; }
 .topbar-link { font-size: 12px; color: var(--ink-soft); text-decoration: none; padding: 6px 0; }
 .topbar-link:hover { color: var(--ink); }
 body:not(.is-off) .topbar-link { display: none; }
+body.is-off #btn-settings,
 body.is-off #btn-load,
 body.is-off #btn-save,
 body.is-off #btn-menu,
@@ -501,3 +502,41 @@ body.is-off #dirty-badge { display: none; }
 .welcome-unsupported button { height: 32px; padding: 0 14px; font-size: 12px; }
 .welcome-help { margin: 28px 0 0; font-size: 11px; color: var(--muted); }
 .welcome-help a { color: var(--ink-soft); }
+
+/* ---- 設定の面 ---- */
+.btn-settings { border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 10px; font-size: 12px; }
+.btn-settings[aria-pressed="true"] { color: var(--ink); font-weight: 500; border-bottom-color: var(--focus); }
+.set-panel { max-width: 720px; margin: 0 auto; padding: 20px 24px 56px; }
+.set-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.set-head .btn-text { padding: 0; height: 32px; font-size: 12px; }
+.set-note { margin: 0; font-size: 11px; color: var(--muted); text-align: right; }
+.panel h2.set-title, .set-panel h2.set-title { margin: 12px 0 0; font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
+.set-sec { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+.set-sec-head { display: flex; align-items: center; justify-content: space-between; }
+.set-sec-head h3 { margin: 0; font-size: 13px; font-weight: 500; }
+.btn-line { height: 28px; padding: 0 10px; border: 1px solid #e4e5de; border-radius: 4px; background: #fffffd; color: var(--ink-soft); font-size: 11px; }
+.set-label { margin-top: 18px; font-size: 11px; color: var(--muted); }
+.set-label:first-of-type { margin-top: 14px; }
+.set-label .set-range-hint { margin-left: 6px; }
+.set-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.set-chip { height: 34px; padding: 0 14px; border: 1px solid #e4e5de; border-bottom-width: 2px; border-radius: 4px; background: #fffffd; color: var(--ink-soft); font-size: 12px; }
+.set-chip[aria-pressed="true"] { border-color: var(--sel-edge); background: var(--sel-bg); color: var(--ink); }
+.set-range { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+.set-range input[type="range"] { flex: 1 1 0; max-width: 420px; height: 34px; accent-color: var(--focus); }
+.set-range .set-val { width: 44px; font-family: var(--mono); font-size: 12px; }
+.set-layer { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.set-layer + .set-layer, .set-pal + .set-layer { border-top: 1px solid #f3f4ef; }
+.set-layer-name { width: 110px; font-size: 12px; }
+.set-layer-name .num { margin-right: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.set-layer-name .none { color: var(--muted); }
+.set-colorbtn { height: 30px; padding: 0 8px 0 6px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #e4e5de; border-radius: 15px; background: #fffffd; }
+.set-dot { width: 18px; height: 18px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.12); }
+.set-colorbtn .caret { font-size: 10px; color: var(--muted); }
+.set-pal { margin: 0 0 8px 122px; display: grid; grid-template-columns: repeat(8, 28px); gap: 6px; width: max-content; max-width: calc(100% - 122px); padding: 12px; background: #fffffd; border: 1px solid var(--line); border-radius: 6px; }
+.set-sw { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid #fffffd; box-shadow: 0 0 0 1px rgba(0,0,0,0.12); }
+.set-sw[aria-pressed="true"] { border-color: var(--ink); }
+.set-hex { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.set-hex label { font-size: 11px; color: var(--muted); }
+.set-hex .hash { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.set-hex input { width: 72px; height: 26px; padding: 0 6px; border: 1px solid var(--line-key); border-radius: 3px; background: #fff; color: var(--ink); font: 12px var(--mono); text-transform: uppercase; }
+@media (max-width: 560px) { .set-pal { margin-left: 0; max-width: 100%; grid-template-columns: repeat(6, 28px); } }

@@ -19,6 +19,7 @@
       <div class="spacer"></div>
       <span id="dirty-badge" class="dirty-badge" role="status"></span>
       <a id="link-readme" class="topbar-link" href="https://github.com/takoyakeeb/tinykeemap/blob/main/README.md">README</a>
+      <button id="btn-settings" class="btn-text btn-settings" type="button" aria-pressed="false" hidden>設定</button>
       <button id="btn-load" class="btn-text" type="button" disabled title="キーボードに保存した内容を読み直します。保存していない変更は破棄されます">LOAD</button>
       <button id="btn-save" class="btn-primary" type="button" disabled title="今のキーマップをキーボードの Flash に保存します">SAVE</button>
       <button id="btn-menu" class="btn-icon" type="button" aria-label="その他" aria-haspopup="menu" aria-expanded="false">···</button>
@@ -77,6 +78,16 @@
 
     <div id="error" class="error" role="alert" hidden></div>
     <div id="save-msg" class="edit-msg" role="status" hidden></div>
+
+    <!-- 設定の面(上の1行の「設定」で開く。cfg=1 のファームだけ)。中身は app.js が作る -->
+    <section class="set-panel" id="settings-panel" aria-labelledby="settings-title" hidden>
+      <div class="set-head">
+        <button id="btn-settings-back" class="btn-text" type="button">← キーマップに戻る</button>
+        <p class="set-note">変更はすぐ反映されます。「SAVE」を押すと保存されます。</p>
+      </div>
+      <h2 id="settings-title" class="set-title">設定</h2>
+      <div id="settings-body"></div>
+    </section>
 
     <section class="panel" id="keymap-panel" aria-labelledby="keymap-title" hidden>
       <h2 id="keymap-title" class="sr-only">キーマップ</h2>

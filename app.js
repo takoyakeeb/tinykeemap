@@ -328,6 +328,10 @@ const els = {
   resetConfirmText: document.getElementById("reset-confirm-text"),
   resetCancel: document.getElementById("reset-cancel"),
   resetOk: document.getElementById("reset-ok"),
+  btnSettings: document.getElementById("btn-settings"),
+  settingsPanel: document.getElementById("settings-panel"),
+  settingsBody: document.getElementById("settings-body"),
+  btnSettingsBack: document.getElementById("btn-settings-back"),
   keymapPanel: document.getElementById("keymap-panel"),
   keymap: document.getElementById("keymap"),
   layerTabs: document.getElementById("layer-tabs"),
@@ -455,6 +459,7 @@ function updateButtons() {
   els.disconnect.disabled = !connected;
   updateEditControls();
   updateSaveControls();
+  updateSettingsControls();
 }
 
 // 編集・保存の操作は、キーマップを表示していて、通信中でも応答なしでもないときだけできる
@@ -502,6 +507,9 @@ function clearResults() {
   els.keymap.replaceChildren();
   els.layerTabs.querySelectorAll(".tab, .tab-edit").forEach((t) => t.remove());
   model = null;
+  els.settingsBody.replaceChildren();
+  setUi.built = false;
+  applyView();
   updateUnsavedBanner();
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
   setDeviceLayerStep(false);
@@ -782,7 +790,7 @@ function renderLayer(layerIndex, codes, info) {
 // 画面の幅が変わったとき、マスの大きさと表示の形を合わせ直す
 let relayoutQueued = false;
 function relayoutStage() {
-  if (!model || model.caps.length === 0 || relayoutQueued) return;
+  if (!model || model.view === "settings" || model.caps.length === 0 || relayoutQueued) return; // 設定の面では、キーの絵が隠れていて、幅が測れない
   relayoutQueued = true;
   requestAnimationFrame(() => {
     relayoutQueued = false;
@@ -832,7 +840,7 @@ async function loadAll(startLayer) {
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null, editingLayer: null };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null, editingLayer: null, view: "keymap" };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -859,6 +867,7 @@ async function loadAll(startLayer) {
     refreshDirtyMarks();
     updateUnsavedBanner();
     els.editPanel.hidden = false;
+    applyView();
     renderPicker(); // レイヤー切り替えの欄に、レイヤー名(MAC・EDIT)を出すため、model を作ったあとにも作り直す
 
     setStatus("on", "接続中 (" + info.name + ")");
@@ -1199,6 +1208,296 @@ function updatePreview() {
     : "  一覧にない値です。デバイスが対応していなければ、エラーになります");
   els.kcAfter.textContent = k ? k.label : "一覧にない値 " + keycodeHex(p.code);
   markPicked();
+}
+
+/* ---- 設定の面(いまは LED。OLED とキーの表記は、このあと足す) ---- */
+
+// 効果の名前 → 画面の名前。ここにない名前(ファームが足したもの)は、その名前のまま出す。test は診断用なので出さない
+const LED_MODE_LABELS = { layer: "レイヤーの色", press: "押すと光る", breathe: "ゆっくり変化", off: "消灯" };
+const LED_MODE_HIDDEN = new Set(["test"]);
+const LED_MIN = 10;
+const LED_MAX = 100;
+const LED_STEP = 5;
+// パレット(23色)。見本のとおり。先頭の8色は、レイヤーの初期色を含む
+const LED_PALETTE = [
+  "2060FF", "20D0FF", "20FF40", "C0FF20", "FFD000", "FF8000", "FF2020", "FF2080",
+  "80A0FF", "80E8FF", "80FF98", "E0FF90", "FFE880", "FFB870", "FF9090", "FF90C0",
+  "C040FF", "20FFC0", "60FF20", "FFB000", "FF6040", "FF40C0", "FFFFFF",
+];
+
+// 設定の面の部品(buildSettings が作る)
+const setUi = { built: false, chips: [], range: null, val: null, layers: [], open: -1 };
+
+// 小さな部品を作る
+function makeEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// 「キーマップの面」と「設定の面」の、どちらを見せるか(model.view)を、画面に反映する
+function applyView() {
+  if (model !== null && model.view === "settings" && !model.cfg) model.view = "keymap"; // 設定を読めなくなったら、戻す
+  const settings = model !== null && model.view === "settings";
+  els.keymapPanel.hidden = model === null || settings;
+  els.editPanel.hidden = model === null || settings;
+  els.settingsPanel.hidden = !settings;
+  els.btnSettings.hidden = !(model !== null && model.cfg);
+  els.btnSettings.setAttribute("aria-pressed", settings ? "true" : "false");
+  if (model !== null && !settings) relayoutStage();
+}
+
+function setView(view) {
+  if (!model || !canOperate()) return;
+  if (view === "settings" && !model.cfg) return;
+  model.view = view;
+  if (view === "settings") buildSettings();
+  applyView();
+  window.scrollTo(0, 0);
+}
+
+// 設定の面の部品を、通信中は押せなくする(「設定」のボタンも)
+function updateSettingsControls() {
+  const usable = canOperate();
+  els.btnSettings.disabled = !usable;
+  els.btnSettingsBack.disabled = !usable;
+  els.settingsBody.querySelectorAll("button, input").forEach((e) => { e.disabled = !usable; });
+}
+
+// 設定を変えられなかったとき
+function cfgFail(e) {
+  if (transport === null) return;
+  const detail = e instanceof ProtocolError ? "ERR " + e.code + (e.message ? " " + e.message : "") : describeError(e);
+  showSaveMessage("fail", "設定を変えられませんでした(" + detail + ")。");
+  syncSettings();
+}
+
+// 設定を1つ書き換えて、実際の値を読み直す(値を省くと、初期値に戻る)。そのあと、帯を saved に合わせる
+async function setCfg(name, value) {
+  try {
+    clearSaveMessage();
+    await cfgSet(name, value);
+    model.cfg.values[name] = await cfgGet(name);
+    syncSettings();
+    await tryRefreshSaved();
+  } catch (e) {
+    cfgFail(e);
+  }
+}
+
+// スライダーを動かしている間の送り方。名前ごとに、いちばん新しい値だけを、順に送る(送っている間に動いた分は、まとめる)。
+// 送り終わると解決する Promise を返す(送っている最中に呼ぶと、同じ Promise)
+const liveSend = {};
+function sendLive(name, value) {
+  const st = liveSend[name] || (liveSend[name] = { next: null, promise: null });
+  st.next = String(value);
+  if (!st.promise) {
+    st.promise = (async () => {
+      try {
+        while (st.next !== null) {
+          const v = st.next;
+          st.next = null;
+          await cfgSet(name, v);
+        }
+      } finally {
+        st.promise = null;
+      }
+    })();
+  }
+  return st.promise;
+}
+
+function onLedInput() {
+  const v = Number(setUi.range.value);
+  setUi.val.textContent = v + "%";
+  sendLive("led", v).catch(cfgFail); // 動かしている間も、LED が変わる
+}
+
+async function onLedChange() {
+  try {
+    clearSaveMessage();
+    await sendLive("led", Number(setUi.range.value));
+    model.cfg.values.led = await cfgGet("led");
+    syncSettings();
+    await tryRefreshSaved();
+  } catch (e) {
+    cfgFail(e);
+  }
+}
+
+// LED の節を、初期値に戻す(効果・明るさ・色)。キーボードの RAM だけ。SAVE するまで保存されない
+async function resetLed() {
+  try {
+    clearSaveMessage();
+    const names = ["led", "led_mode"];
+    for (let l = 0; l < model.info.layers; l++) names.push("lcolor" + l);
+    for (const name of names) {
+      if (!model.cfg.names.includes(name)) continue;
+      await cfgSet(name);
+      model.cfg.values[name] = await cfgGet(name);
+    }
+    syncSettings();
+    await tryRefreshSaved();
+  } catch (e) {
+    cfgFail(e);
+  }
+}
+
+// 色の丸を押したとき: そのレイヤーのパレットを開く(ほかは閉じる)
+function toggleLedPalette(l) {
+  setUi.open = setUi.open === l ? -1 : l;
+  setUi.layers.forEach((row, i) => {
+    if (!row) return;
+    row.pal.hidden = i !== setUi.open;
+    row.btn.setAttribute("aria-expanded", i === setUi.open ? "true" : "false");
+  });
+}
+
+// 設定の面を、いまの設定(model.cfg)から作る。入るたびと、LOAD のあとに作り直す
+function buildSettings() {
+  const cfg = model.cfg;
+  els.settingsBody.replaceChildren();
+  setUi.chips = [];
+  setUi.range = null;
+  setUi.val = null;
+  setUi.layers = [];
+  setUi.open = -1;
+  const has = (name) => cfg.names.includes(name);
+
+  const sec = makeEl("section", "set-sec");
+  sec.setAttribute("aria-label", "LED");
+  const head = makeEl("div", "set-sec-head");
+  head.append(makeEl("h3", "", "LED"));
+  const reset = makeEl("button", "btn-line", "初期値に戻す");
+  reset.type = "button";
+  reset.addEventListener("click", resetLed);
+  head.append(reset);
+  sec.append(head);
+
+  // 効果(候補は CFG LIST から)
+  if (has("led_mode")) {
+    sec.append(makeEl("div", "set-label", "効果"));
+    const chips = makeEl("div", "set-chips");
+    for (const name of cfg.options.led_mode || []) {
+      if (LED_MODE_HIDDEN.has(name)) continue;
+      const b = makeEl("button", "set-chip", LED_MODE_LABELS[name] || name);
+      b.type = "button";
+      b.dataset.value = name;
+      b.addEventListener("click", () => { if (cfg.values.led_mode !== name) setCfg("led_mode", name); });
+      chips.append(b);
+      setUi.chips.push(b);
+    }
+    sec.append(chips);
+  }
+
+  // 明るさ
+  if (has("led")) {
+    const label = makeEl("div", "set-label");
+    const lab = makeEl("label", "", "明るさ");
+    lab.htmlFor = "set-led";
+    label.append(lab, makeEl("span", "set-range-hint", LED_MIN + "% 〜 " + LED_MAX + "%"));
+    sec.append(label);
+    const row = makeEl("div", "set-range");
+    const range = document.createElement("input");
+    range.type = "range";
+    range.id = "set-led";
+    range.min = String(LED_MIN);
+    range.max = String(LED_MAX);
+    range.step = String(LED_STEP);
+    range.addEventListener("input", onLedInput);
+    range.addEventListener("change", onLedChange);
+    const val = makeEl("span", "set-val");
+    row.append(range, val);
+    sec.append(row);
+    setUi.range = range;
+    setUi.val = val;
+  }
+
+  // レイヤーごとの色
+  const colorLayers = [];
+  for (let l = 0; l < model.info.layers; l++) if (has("lcolor" + l)) colorLayers.push(l);
+  if (colorLayers.length > 0) {
+    sec.append(makeEl("div", "set-label", "レイヤーの色"));
+    const list = makeEl("div", "");
+    list.style.marginTop = "4px";
+    for (const l of colorLayers) {
+      const row = makeEl("div", "set-layer");
+      const nameEl = makeEl("div", "set-layer-name");
+      const btn = makeEl("button", "set-colorbtn");
+      btn.type = "button";
+      btn.setAttribute("aria-label", "L" + l + " の色を選ぶ");
+      btn.setAttribute("aria-haspopup", "true");
+      btn.setAttribute("aria-expanded", "false");
+      const dot = makeEl("span", "set-dot");
+      btn.append(dot, makeEl("span", "caret", "▾"));
+      btn.addEventListener("click", () => toggleLedPalette(l));
+      row.append(nameEl, btn);
+      list.append(row);
+
+      const pal = makeEl("div", "set-pal");
+      pal.hidden = true;
+      pal.setAttribute("role", "group");
+      pal.setAttribute("aria-label", "L" + l + " の色");
+      const sws = LED_PALETTE.map((hex) => {
+        const sw = makeEl("button", "set-sw");
+        sw.type = "button";
+        sw.style.background = "#" + hex;
+        sw.setAttribute("aria-label", "#" + hex);
+        sw.dataset.hex = hex;
+        sw.addEventListener("click", () => setCfg("lcolor" + l, hex));
+        pal.append(sw);
+        return sw;
+      });
+      const hexRow = makeEl("div", "set-hex");
+      const hexLabel = makeEl("label", "", "色コード");
+      const input = document.createElement("input");
+      input.type = "text";
+      input.id = "set-hex" + l;
+      input.maxLength = 6;
+      input.spellcheck = false;
+      input.autocomplete = "off";
+      hexLabel.htmlFor = input.id;
+      input.addEventListener("input", () => {
+        const fixed = input.value.toUpperCase().replace(/[^0-9A-F]/g, "");
+        if (fixed !== input.value) input.value = fixed;
+        if (fixed.length === 6 && fixed !== cfg.values["lcolor" + l]) setCfg("lcolor" + l, fixed);
+      });
+      hexRow.append(hexLabel, makeEl("span", "hash", "#"), input);
+      pal.append(hexRow);
+      list.append(pal);
+      setUi.layers[l] = { nameEl, btn, dot, pal, sws, input };
+    }
+    sec.append(list);
+  }
+
+  els.settingsBody.append(sec);
+  setUi.built = true;
+  syncSettings();
+  updateSettingsControls();
+}
+
+// 設定の面の表示を、いまの値(model.cfg.values)に合わせる。部品は作り直さない(入力中の欄を壊さないため)
+function syncSettings() {
+  if (!setUi.built || !model || !model.cfg) return;
+  const v = model.cfg.values;
+  for (const b of setUi.chips) b.setAttribute("aria-pressed", b.dataset.value === v.led_mode ? "true" : "false");
+  if (setUi.range) {
+    const led = Number(v.led);
+    if (Number.isFinite(led) && v.led !== "") {
+      if (document.activeElement !== setUi.range) setUi.range.value = String(Math.min(LED_MAX, Math.max(LED_MIN, led)));
+      setUi.val.textContent = led + "%";
+    }
+  }
+  setUi.layers.forEach((row, l) => {
+    if (!row) return;
+    const hex = (v["lcolor" + l] || "").toUpperCase();
+    row.dot.style.background = /^[0-9A-F]{6}$/.test(hex) ? "#" + hex : "transparent";
+    for (const sw of row.sws) sw.setAttribute("aria-pressed", sw.dataset.hex === hex ? "true" : "false");
+    if (document.activeElement !== row.input) row.input.value = hex;
+    const name = layerName(l);
+    row.nameEl.replaceChildren(makeEl("span", "num", "L" + l), makeEl("span", name ? "" : "none", name || "名前なし"));
+  });
 }
 
 /* ---- レイヤーのタブ ---- */
@@ -1716,6 +2015,8 @@ async function doLoad() {
     if (model.info.cfg) {
       model.cfg = await tryReadCfg();
       renderCfgInfoRow(model.cfg);
+      if (model.view === "settings" && model.cfg) buildSettings(); // 読み直した値で、設定の面を作り直す
+      applyView();
     }
     baseline = copyCodes(codes);
     model.deviceUnsaved = false;
@@ -1993,6 +2294,9 @@ function init() {
   els.connect.addEventListener("click", connect);
   els.reload.addEventListener("click", () => loadAll(model ? model.current : 0));
   els.disconnect.addEventListener("click", disconnect);
+  // 設定の面
+  els.btnSettings.addEventListener("click", () => setView(model && model.view === "settings" ? "keymap" : "settings"));
+  els.btnSettingsBack.addEventListener("click", () => setView("keymap"));
   // 編集欄
   updateModLabels();
   renderPicker();
