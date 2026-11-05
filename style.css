@@ -198,6 +198,20 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 .tab.active { color: var(--ink); font-weight: 500; border-bottom-color: var(--ink); }
 .tab-num { font-family: var(--mono); font-size: 11px; }
 .tab-num + .tab-name:not(:empty) { margin-left: 8px; }
+.tab-edit { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-bottom: 2px solid var(--ink); color: var(--ink); }
+.tab-input {
+  margin-left: 8px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line-key);
+  border-radius: 4px;
+  background: var(--cap);
+  color: var(--ink);
+  font: 12px var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tab-input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tab-dot { display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--unsaved); vertical-align: middle; }
 
 /* キーの絵: 機種定義の位置と幅で、マスを並べる(大きさは app.js が決める)。広すぎるときは横にスクロール */

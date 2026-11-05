@@ -500,7 +500,7 @@ function clearResults() {
   els.editPanel.hidden = true;
   els.info.replaceChildren();
   els.keymap.replaceChildren();
-  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
+  els.layerTabs.querySelectorAll(".tab, .tab-edit").forEach((t) => t.remove());
   model = null;
   updateUnsavedBanner();
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
@@ -832,7 +832,7 @@ async function loadAll(startLayer) {
 
     warnings.push(...layoutResult.warnings);
 
-    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null, editingLayer: null };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -1023,7 +1023,7 @@ function buildLayerPick(usable) {
       els.lkKinds.appendChild(btn);
     }
   }
-  const names = model && model.layout ? model.layout.layerNames : [];
+  const nameOf = (n) => (model && model.layout ? layerName(n) : "");
   for (let n = 0; n < deviceLayers && n <= LAYER_KEY_MAX; n++) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -1034,10 +1034,10 @@ function buildLayerPick(usable) {
     num.className = "lt-num";
     num.textContent = "L" + n;
     btn.appendChild(num);
-    if (names[n]) {
+    if (nameOf(n)) {
       const name = document.createElement("span");
       name.className = "lt-name";
-      name.textContent = names[n];
+      name.textContent = nameOf(n);
       btn.appendChild(name);
     }
     els.lkTargets.appendChild(btn);
@@ -1204,7 +1204,7 @@ function updatePreview() {
 /* ---- レイヤーのタブ ---- */
 
 function buildTabs() {
-  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
+  els.layerTabs.querySelectorAll(".tab, .tab-edit").forEach((t) => t.remove());
   model.tabs = model.codes.map((_, l) => {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -1219,24 +1219,125 @@ function buildTabs() {
     dot.setAttribute("role", "img");
     dot.setAttribute("aria-label", "未保存の変更あり");
     btn.append(num, name, dot);
-    btn.addEventListener("click", () => setCurrentLayer(l));
+    btn.addEventListener("click", () => {
+      // 選んでいるタブをもう一度押すと、名前を書き換えられる(設定に対応したファームだけ)
+      if (l === model.current && canEditLayerName(l)) startLayerNameEdit(l);
+      else setCurrentLayer(l);
+    });
     els.layerTabs.appendChild(btn);
     return { btn, name, dot };
   });
   updateTabs();
 }
 
-// 名前と「空」と ● を更新する。名前は機種定義の既定の名前。名前がなくて、中身がすべて「透過」なら「空」
+// レイヤー名。設定に対応したファーム(cfg=1)は、設定の lname<n>。対応していないファームは、機種定義の既定の名前。
+// 名前がないときは ""
+function layerName(l) {
+  if (model.cfg && Object.prototype.hasOwnProperty.call(model.cfg.values, "lname" + l)) return model.cfg.values["lname" + l];
+  return model.layout.layerNames[l] || "";
+}
+
+// そのレイヤーの名前を、書き換えられるか
+function canEditLayerName(l) {
+  return canOperate() && model.cfg !== null && model.info.lname > 0 && model.cfg.names.includes("lname" + l);
+}
+
+// 名前の入力欄を出す。タブのボタンは隠して、同じ場所に、番号と入力欄を置く
+function startLayerNameEdit(l) {
+  if (model.editingLayer !== null) return;
+  model.editingLayer = l;
+  const t = model.tabs[l];
+  const wrap = document.createElement("span");
+  wrap.className = "tab-edit";
+  const num = document.createElement("span");
+  num.className = "tab-num";
+  num.textContent = String(l);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "tab-input";
+  input.maxLength = model.info.lname;
+  input.style.width = "calc(" + (model.info.lname + 1) + "ch + 16px)";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("aria-label", "レイヤー " + l + " の名前(英大文字・数字・-・_ で " + model.info.lname + " 文字まで。Enter で決定、Esc でやめる)");
+  input.value = layerName(l);
+  wrap.append(num, input);
+  els.layerTabs.insertBefore(wrap, t.btn);
+  t.btn.hidden = true;
+
+  let finished = false;
+  const finish = (commit) => {
+    if (finished) return;
+    finished = true;
+    const text = input.value;
+    wrap.remove();
+    t.btn.hidden = false;
+    model.editingLayer = null;
+    t.btn.focus();
+    if (commit) commitLayerName(l, text);
+  };
+  // 使えない文字は、打った時点で取り除く(小文字は大文字にする)。日本語入力の変換中は、そのまま
+  input.addEventListener("input", (ev) => {
+    if (ev.isComposing) return;
+    const fixed = input.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+    if (fixed !== input.value) input.value = fixed;
+  });
+  input.addEventListener("compositionend", () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, model.info.lname);
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.isComposing) return;
+    if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
+    else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(false)); // 別の場所を押したときは、やめる
+  input.focus();
+  input.select();
+}
+
+// レイヤー名を、デバイスに送る(RAM だけ。確定は SAVE)。空にすると、その名前の初期値に戻る(L0 は MAC、L1 は EDIT、ほかは空)
+async function commitLayerName(l, text) {
+  if (!canOperate()) return;
+  const key = "lname" + l;
+  if (text === model.cfg.values[key]) return;
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  try {
+    await cfgSet(key, text);
+    model.cfg.values[key] = await cfgGet(key); // 実際の値を読み直す(空にしたときは、初期値)
+    await refreshSaved();
+  } catch (e) {
+    if (transport === null) return;
+    if (e instanceof ProtocolError && e.code === "BADARG") showSaveMessage("fail", "この名前は使えません(ERR " + e.code + (e.message ? " " + e.message : "") + ")。");
+    else showSaveMessage("fail", "名前を変えられませんでした。" + describeError(e));
+  } finally {
+    busy = false;
+    updateButtons();
+    updateTabs();
+    renderPicker(); // レイヤー切り替えの欄の名前も、合わせる
+  }
+}
+
+// INFO を読み直して、「保存していない変更」の帯を、キーボードの答え(saved)に合わせる
+async function refreshSaved() {
+  const info = normalizeInfo(parseInfoData((await request("INFO")).data));
+  model.deviceUnsaved = info.saved === 0;
+  updateUnsavedBanner();
+}
+
+// 名前と「空」と ● を更新する。名前は layerName の名前。名前がなくて、中身がすべて「透過」なら「空」
 function updateTabs() {
   if (!model || !model.tabs) return;
   const fit = baselineFits(model.codes);
   model.tabs.forEach((t, l) => {
     const codes = model.codes[l];
     const empty = codes.every((c) => c === 0x0001);
-    const label = model.layout.layerNames[l] || (empty ? "空" : "");
+    const label = layerName(l) || (empty ? "空" : "");
     const changed = fit && codes.some((c, i) => c !== baseline[l][i]);
     const active = l === model.current;
     t.name.textContent = label;
+    t.btn.title = canEditLayerName(l) && l === model.current ? "もう一度押すと、名前を変えられます" : "";
     t.dot.hidden = !changed;
     t.btn.classList.toggle("active", active);
     t.btn.setAttribute("aria-pressed", active ? "true" : "false");
