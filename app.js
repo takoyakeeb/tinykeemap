@@ -823,7 +823,10 @@ async function loadAll(startLayer) {
     const info = normalizeInfo(rawInfo);
     // 機種定義(キーの位置と幅、既定のレイヤー名)を探して、マスの並びに使う
     const custom = findCustomLayout(info.name);
-    const layoutResult = resolveLayout(info, findDeviceDef(info.name), custom);
+    const def0 = findDeviceDef(info.name);
+    const fileKle = await fetchLayoutFile(info.name); // layouts/<機種名>.json
+    const def = def0 || fileKle ? { layers: def0 ? def0.layers : [], kle: fileKle } : null;
+    const layoutResult = resolveLayout(info, def, custom);
     renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
@@ -839,6 +842,9 @@ async function loadAll(startLayer) {
     }
 
     warnings.push(...layoutResult.warnings);
+    if (layoutResult.origin === "grid" && !(def && def.kle) && custom === null) {
+      warnings.push("この機種のキーの並びがありません。「…」の「配列を読み込む…」で、KLE ファイルを選んでください。");
+    }
 
     model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null, editingLayer: null, view: "keymap" };
     els.keymapPanel.hidden = false;

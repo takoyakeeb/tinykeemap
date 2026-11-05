@@ -1,8 +1,9 @@
 // tinykeemap: 機種定義(キーの位置と幅、既定のレイヤー名)
 //
-// ・機種ごとに、キーの配置を KLE(keyboard-layout-editor.com)の JSON の形で書く(kle)。
-//   KLE の「Download JSON」で保存した内容を、そのまま貼り付けられる。
-// ・機種は、INFO の name で探す(大文字小文字は区別しない)。定義がない機種は、行×列の格子で表示する。
+// ・キーの配置は、KLE(keyboard-layout-editor.com)の JSON の形。
+//   KLE の「Download JSON」で保存した内容を、そのまま layouts/ に置ける。
+// ・キーの配置(KLE の JSON)は、layouts/<機種名>.json に置く(fetchLayoutFile)。ここには、既定のレイヤー名だけを書く。
+// ・機種は、INFO の name で探す(大文字小文字は区別しない)。配置がない機種は、行×列の格子で表示する。
 // ・キーの文字(KLE のキーの左上の文字)に「行,列」を書くと、index = 行 × 列数 + 列 に対応づける(VIA と同じ方式)。
 //   文字がなければ、ファイルに書いてある順番を index とする(キー数が INFO の keys と同じときだけ)。
 // ・読むのは、位置(x, y)と大きさ(w, h)だけ。色・文字の大きさなどは読み飛ばす。
@@ -14,10 +15,6 @@
 const DEVICES = {
   takoyaki8: {
     layers: ["MAC", "EDIT"], // 既定のレイヤー名(L0, L1, …)。足りない分は名前なし
-    kle: [
-      ["0,0", "0,1", "0,2", "0,3"],
-      ["1,0", "1,1", "1,2", "1,3"],
-    ],
   },
 };
 
@@ -28,6 +25,26 @@ function findDeviceDef(name) {
     if (id.toLowerCase() === want) return DEVICES[id];
   }
   return null;
+}
+
+// layouts/<機種名>.json(KLE の JSON)を、このページと同じ場所から読む(なければ null)
+//   機種名は、小文字にして、英数字・-・_ だけを使う(それ以外の文字があれば探さない)
+//   結果は、このページを閉じるまで覚える(なかったことも覚える)
+const layoutFileCache = {};
+
+async function fetchLayoutFile(name) {
+  const id = String(name).toLowerCase();
+  if (!/^[a-z0-9_-]+$/.test(id)) return null;
+  if (Object.prototype.hasOwnProperty.call(layoutFileCache, id)) return layoutFileCache[id];
+  let kle = null;
+  try {
+    const resp = await fetch("layouts/" + id + ".json", { cache: "no-cache" });
+    if (resp.ok) kle = await resp.json();
+  } catch (e) {
+    kle = null; // 見つからない・読めない・JSON ではない(file:// で開いたときも)
+  }
+  layoutFileCache[id] = kle;
+  return kle;
 }
 
 // KLE の JSON(JSON.parse したあとの配列)を読んで、キーの一覧にする
@@ -153,7 +170,7 @@ function resolveLayout(info, def, custom) {
       break;
     }
     if (t.origin === "custom") {
-      warnings.push("読み込んだ配列を使えないため、" + (def && def.kle ? "内蔵の配列" : "行×列の格子") + "で表示します: " + mapped.reason);
+      warnings.push("読み込んだ配列を使えないため、" + (def && def.kle ? "layouts/ の配列" : "行×列の格子") + "で表示します: " + mapped.reason);
     } else {
       warnings.push("機種定義を使えないため、行×列の格子で表示します: " + mapped.reason);
     }
@@ -177,7 +194,7 @@ function describeLayout(result) {
   if (result.origin === "custom") {
     return "読み込んだ配列" + (result.originLabel ? "(" + result.originLabel + "。" : "(") + how + nameText + ")";
   }
-  if (result.source === "matrix" || result.source === "order") return "内蔵(" + how + nameText + ")";
+  if (result.source === "matrix" || result.source === "order") return "layouts/ の配列(" + how + nameText + ")";
   return "なし(行 × 列の格子で表示" + nameText + ")";
 }
 
