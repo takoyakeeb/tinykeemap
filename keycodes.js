@@ -206,6 +206,9 @@ const KEYCODE_ROWS = [
   [0x00E5, "KC_RIGHT_SHIFT", "KC_RSFT", "右 Shift", "modifier"],
   [0x00E6, "KC_RIGHT_ALT", "KC_RALT", "右 Alt", "modifier"],
   [0x00E7, "KC_RIGHT_GUI", "KC_RGUI", "右 GUI", "modifier"],
+  // 次・前のレイヤー(takoyakeeb 独自。docs/protocol.md §2。fw 0.5.0 以降)。「キー」の一覧には出さず、「レイヤー切り替え」で選ぶ
+  [0x7E00, "LAYER_NEXT", "", "次のレイヤー", "layer"],
+  [0x7E01, "LAYER_PREV", "", "前のレイヤー", "layer"],
 ];
 
 const KEYCODES = KEYCODE_ROWS.map(([code, name, alias, label, group]) => ({ code, name, alias, label, group }));
@@ -243,6 +246,19 @@ let deviceLayers = 0;
 
 function setDeviceLayers(n) {
   deviceLayers = Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+// 次・前のレイヤー(0x7E00・0x7E01)。INFO に cfg=1 があるファーム(0.5.0 以降)だけが対応している。
+// 対応していないファームでは、選ぶ欄に出さない(入力すれば送れる。拒否されたら ERR BADARG)
+const LAYER_STEP_CODES = new Set([0x7e00, 0x7e01]);
+let deviceLayerStep = false;
+
+function setDeviceLayerStep(on) {
+  deviceLayerStep = on === true;
+}
+
+function isLayerStep(code) {
+  return LAYER_STEP_CODES.has(code);
 }
 
 // 値がレイヤー切り替えなら { kind, n } を返す(違えば null)
@@ -295,6 +311,46 @@ const MOD_KINDS = [
   { bit: 0x0800, label: "GUI", left: "LGUI", right: "RGUI", short: "G" },
 ];
 
+// ---- 修飾キーの表記(OS ごと。画面に出す文字だけ。内部の名前 LGUI などと、直接入力の書き方は変えない) ----
+// Mac: Option・Cmd(小さいマスは記号 ⌃⇧⌥⌘)。Windows: Alt・Win。Linux・不明: Alt・GUI。小さいマスは、Mac 以外は文字。
+const MOD_NOTATION = {
+  mac:   { Ctrl: "Ctrl", Shift: "Shift", Alt: "Option", GUI: "Cmd" },
+  win:   { Ctrl: "Ctrl", Shift: "Shift", Alt: "Alt", GUI: "Win" },
+  other: { Ctrl: "Ctrl", Shift: "Shift", Alt: "Alt", GUI: "GUI" },
+};
+const MOD_SYMBOL_MAC = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", GUI: "⌘" };
+
+// ブラウザの OS を、"mac" / "win" / "other" で返す
+function detectOs() {
+  if (typeof navigator === "undefined") return "other";
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  const text = platform + " " + (navigator.userAgent || "");
+  if (/mac/i.test(platform) || (!platform && /Macintosh/i.test(text))) return "mac";
+  if (/win/i.test(platform) || (!platform && /Windows/i.test(text))) return "win";
+  return "other";
+}
+
+// 表記の選び方("auto": ブラウザの OS で決める / "mac" / "win")と、いま使っている表記の OS("mac" / "win" / "other")。
+// 選び方は、設定の面で切り替える(app.js が、ブラウザに保存する)
+let notationMode = "auto";
+let notationOs = detectOs();
+
+function setNotationMode(mode) {
+  notationMode = mode === "mac" || mode === "win" ? mode : "auto";
+  notationOs = notationMode === "auto" ? detectOs() : notationMode;
+}
+
+// 修飾キー(MOD_KINDS の項目)の、画面に出す名前
+function modLabel(kind) {
+  return MOD_NOTATION[notationOs][kind.label];
+}
+
+// 小さいマス(1行)で使う、修飾キーの短い表記と、つなぎ方
+function modCompact(kinds) {
+  if (notationOs === "mac") return kinds.map((m) => MOD_SYMBOL_MAC[m.label]).join("");
+  return kinds.map((m) => modLabel(m) + "+").join("");
+}
+
 // 入力で使える書き方 → { kind, isRight }。LSFT / S は左側、RSFT は右側
 const MOD_WRAPPER_BY_NAME = new Map();
 for (const m of MOD_KINDS) {
@@ -318,7 +374,7 @@ function describeModified(code) {
   let name = base.name;
   for (let i = mods.length - 1; i >= 0; i--) name = (isRight ? mods[i].right : mods[i].left) + "(" + name + ")";
   // 「Ctrl+Shift+A」の形(右側は「右Ctrl+右Shift+A」)
-  const text = mods.map((m) => (isRight ? "右" : "") + m.label).concat([base.label]).join("+");
+  const text = mods.map((m) => (isRight ? "右" : "") + modLabel(m)).concat([base.label]).join("+");
   return { code, name, alias: "", label: text, cap: text, group: "modified", warn: "" };
 }
 
@@ -384,7 +440,7 @@ function parseKeycodeText(text) {
 // 一覧の絞り込み。空白で区切った言葉が、すべて(値・名前・別名・表示名のどれかに)含まれる項目を返す
 function searchKeycodes(text) {
   const words = String(text).toLowerCase().split(/\s+/).filter(Boolean);
-  const all = KEYCODES.concat(layerKeycodes());
+  const all = KEYCODES.filter((k) => deviceLayerStep || !isLayerStep(k.code)).concat(layerKeycodes());
   if (words.length === 0) return all;
   return all.filter((k) => {
     const hay = (keycodeHex(k.code) + " " + k.name + " " + k.alias + " " + k.label).toLowerCase();
@@ -407,10 +463,6 @@ const CAP_SHORT = new Map([
 const CAP_LAYER_SMALL = { MO: "押す間", TG: "切替", TO: "移動" };
 const CAP_LAYER_ARROW = { MO: "↓", TG: "⇄", TO: "→" };
 
-// 修飾キーの記号(1行にするとき)。GUI は、2段のときと表記をそろえて「GUI」と書く(10/27の決定)。
-// ⌘ にするかは、OS の判別と一緒に②で見直す
-const CAP_MOD_SYMBOL = { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", GUI: "GUI" };
-
 function capBaseName(code) {
   const k = KEYCODE_BY_CODE.get(code);
   if (!k) return keycodeHex(code);
@@ -432,6 +484,12 @@ function splitModified(code) {
 function capFace(code, compact) {
   if (code === 0x0000) return { small: "", main: "無効", kind: "none" };
   if (code === 0x0001) return { small: "", main: "透過", kind: "trans" };
+  if (isLayerStep(code)) {
+    const next = code === 0x7e00;
+    return compact
+      ? { small: "", main: next ? "次L" : "前L", kind: "normal" }
+      : { small: "レイヤー", main: next ? "次" : "前", kind: "normal" };
+  }
   const lk = decodeLayerKey(code);
   if (lk) {
     const out = deviceLayers > 0 && lk.n >= deviceLayers;
@@ -442,8 +500,8 @@ function capFace(code, compact) {
   const mod = splitModified(code);
   if (mod) {
     const base = capBaseName(mod.baseCode);
-    if (compact) return { small: "", main: mod.mods.map((m) => CAP_MOD_SYMBOL[m.label]).join("") + base, kind: "normal" };
-    return { small: mod.mods.map((m) => (mod.isRight ? "右" : "") + m.label).join(" "), main: base, kind: "normal" };
+    if (compact) return { small: "", main: modCompact(mod.mods) + base, kind: "normal" };
+    return { small: mod.mods.map((m) => (mod.isRight ? "右" : "") + modLabel(m)).join(" "), main: base, kind: "normal" };
   }
   const k = KEYCODE_BY_CODE.get(code);
   if (!k) return { small: "", main: keycodeHex(code), kind: "normal" }; // 一覧にない値だけは、16進で出す
@@ -451,7 +509,7 @@ function capFace(code, compact) {
     // 修飾キー単体: 「左 GUI(Windows / Super キー)」→ 上に「左」、下に「GUI」
     const kind = MOD_KINDS[(code - 0x00e0) & 3];
     const side = code >= 0x00e4 ? "右" : "左";
-    return compact ? { small: "", main: side + kind.label, kind: "normal" } : { small: side, main: kind.label, kind: "normal" };
+    return compact ? { small: "", main: side + modLabel(kind), kind: "normal" } : { small: side, main: modLabel(kind), kind: "normal" };
   }
   if (k.group === "keypad" && k.label.startsWith("テンキー ")) {
     const rest = k.label.slice("テンキー ".length);
@@ -484,6 +542,7 @@ function keyCategory(k) {
     case "basic": return "basic";
     case "modifier": return "basic";
     case "symbols": return "sym";
+    case "layer": return "layer"; // 次・前のレイヤー。「キー」の一覧のカテゴリにはない(「レイヤー切り替え」で選ぶ)
     case "function": return k.code <= 0x0045 ? "fn" : "other"; // F1〜F12 は 0x003A〜0x0045
     case "navigation":
       if (ARROW_CODES.has(k.code)) return "arrow";

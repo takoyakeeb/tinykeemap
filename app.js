@@ -264,6 +264,12 @@ function normalizeInfo(raw) {
     rows: toPositiveInt(raw, "rows"),
     cols: toPositiveInt(raw, "cols"),
     layers: toPositiveInt(raw, "layers"),
+    // 設定(CFG)に対応しているか。cfg=1 がない古いファームでは false(設定の面などを出さない)
+    cfg: raw.cfg === "1",
+    // レイヤー名の最大の文字数。cfg=1 のときだけある
+    lname: /^[0-9]+$/.test(raw.lname || "") ? Number(raw.lname) : 0,
+    // 1 = 保存済み、0 = 保存していない変更がある、null = 古いファーム(分からない)
+    saved: raw.saved === "1" ? 1 : raw.saved === "0" ? 0 : null,
   };
 }
 
@@ -315,6 +321,7 @@ const els = {
   menuDetail: document.getElementById("menu-detail"),
   menuDirect: document.getElementById("menu-direct"),
   kcDirect: document.getElementById("kc-direct"),
+  menuShare: document.getElementById("menu-share"),
   menuLayout: document.getElementById("menu-layout"),
   menuLayoutClear: document.getElementById("menu-layout-clear"),
   layoutFile: document.getElementById("layout-file"),
@@ -322,6 +329,10 @@ const els = {
   resetConfirmText: document.getElementById("reset-confirm-text"),
   resetCancel: document.getElementById("reset-cancel"),
   resetOk: document.getElementById("reset-ok"),
+  btnSettings: document.getElementById("btn-settings"),
+  settingsPanel: document.getElementById("settings-panel"),
+  settingsBody: document.getElementById("settings-body"),
+  btnSettingsBack: document.getElementById("btn-settings-back"),
   keymapPanel: document.getElementById("keymap-panel"),
   keymap: document.getElementById("keymap"),
   layerTabs: document.getElementById("layer-tabs"),
@@ -352,6 +363,7 @@ const els = {
   btnSave: document.getElementById("btn-save"),
   btnLoad: document.getElementById("btn-load"),
   dirtyBadge: document.getElementById("dirty-badge"),
+  unsavedBanner: document.getElementById("unsaved-banner"),
   saveMsg: document.getElementById("save-msg"),
   log: document.getElementById("log"),
 };
@@ -402,7 +414,7 @@ function setWelcome(mode, reason) {
   els.welcomeUnsupported.hidden = !unsupported;
   els.welcomeHelp.hidden = unsupported;
   els.conn.hidden = unsupported;
-  if (unsupported) els.welcomeUrl.textContent = pageUrl();
+  if (unsupported) els.welcomeUrl.textContent = pageUrl() + location.hash;
   else setStatus(mode === "busy" ? "busy" : "off", mode === "busy" ? "接続中…" : "未接続");
   els.welcome.hidden = false;
   document.body.classList.add("is-off");
@@ -414,7 +426,7 @@ function copyPageUrl() {
     setTimeout(() => { els.btnCopyUrl.textContent = "リンクをコピー"; }, 2000);
   };
   if (!navigator.clipboard) { done("コピーできません"); return; }
-  navigator.clipboard.writeText(pageUrl()).then(() => done("コピーしました"), () => done("コピーできません"));
+  navigator.clipboard.writeText(pageUrl() + location.hash).then(() => done("コピーしました"), () => done("コピーできません"));
 }
 
 function showError(message, isWarning) {
@@ -448,6 +460,7 @@ function updateButtons() {
   els.disconnect.disabled = !connected;
   updateEditControls();
   updateSaveControls();
+  updateSettingsControls();
 }
 
 // 編集・保存の操作は、キーマップを表示していて、通信中でも応答なしでもないときだけできる
@@ -458,6 +471,7 @@ function canOperate() {
 function updateSaveControls() {
   const usable = canOperate();
   els.btnSave.disabled = !usable;
+  els.menuShare.disabled = !usable;
   els.menuLayout.disabled = !usable;
   els.menuLayoutClear.hidden = !(model !== null && model.custom !== null);
   els.menuLayoutClear.disabled = !usable;
@@ -493,9 +507,14 @@ function clearResults() {
   els.editPanel.hidden = true;
   els.info.replaceChildren();
   els.keymap.replaceChildren();
-  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
+  els.layerTabs.querySelectorAll(".tab, .tab-edit").forEach((t) => t.remove());
   model = null;
+  els.settingsBody.replaceChildren();
+  setUi.built = false;
+  applyView();
+  updateUnsavedBanner();
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
+  setDeviceLayerStep(false);
   renderPicker();
   els.kcHex.value = "";
   updatePreview();
@@ -539,6 +558,83 @@ async function doRequest(command, timeoutMs) {
   return parseResponse(line);
 }
 
+/* ---- 設定(CFG。protocol.md §4) ---- */
+
+// "lname0 led led_mode=layer|press|breathe|off ..." → [{ name, options }]
+// options は、候補の配列。候補のない名前(自由な値)は null
+function parseCfgList(data) {
+  const out = [];
+  for (const token of data.split(/\s+/)) {
+    if (!token) continue;
+    const eq = token.indexOf("=");
+    if (eq < 0) out.push({ name: token, options: null });
+    else if (eq > 0) out.push({ name: token.slice(0, eq), options: token.slice(eq + 1).split("|").filter(Boolean) });
+  }
+  return out;
+}
+
+// 通信に入れてよい名前と値(空白や改行を入れると、別のコマンドになってしまうため)
+function checkCfgToken(text, what) {
+  if (!/^[A-Za-z0-9_,-]+$/.test(text)) throw new Error("設定の" + what + "に使えない文字があります: " + text);
+}
+
+// 設定の値を読む(値が空のときは "")
+async function cfgGet(name) {
+  checkCfgToken(name, "名前");
+  const resp = await request("CFG GET " + name);
+  return resp.data;
+}
+
+// 設定を書き換える(RAM だけ。確定は SAVE)。値を省く(undefined か "")と、初期値に戻る
+async function cfgSet(name, value) {
+  checkCfgToken(name, "名前");
+  if (value === undefined || value === "") {
+    await request("CFG SET " + name);
+    return;
+  }
+  const text = String(value);
+  checkCfgToken(text, "値");
+  await request("CFG SET " + name + " " + text);
+}
+
+// 設定の名前の一覧と、いまの値を、すべて読む
+//   戻り値: { names: [名前...], options: { 名前: [候補...] }, values: { 名前: 値 } }
+async function readCfgAll() {
+  const list = parseCfgList((await request("CFG LIST")).data);
+  const cfg = { names: [], options: {}, values: {} };
+  for (const item of list) {
+    cfg.names.push(item.name);
+    if (item.options) cfg.options[item.name] = item.options;
+    cfg.values[item.name] = await cfgGet(item.name);
+  }
+  return cfg;
+}
+
+// readCfgAll の、ERR で失敗したときは null を返す版(通信が切れたなどは、そのまま投げる)
+async function tryReadCfg() {
+  try {
+    return await readCfgAll();
+  } catch (e) {
+    if (e instanceof ProtocolError) {
+      log("bad", "! 設定を読めませんでした: ERR " + e.code + (e.message ? " " + e.message : ""));
+      return null;
+    }
+    throw e;
+  }
+}
+
+// 「デバイス情報」に、設定の名前を1行足す(確認用)
+function renderCfgInfoRow(cfg) {
+  const old = els.info.querySelector("[data-cfg-row]");
+  if (old) { old.previousElementSibling.remove(); old.remove(); }
+  const dt = document.createElement("dt");
+  dt.textContent = "設定の名前 (CFG LIST)";
+  const dd = document.createElement("dd");
+  dd.dataset.cfgRow = "1";
+  dd.textContent = cfg ? cfg.names.length + " 個: " + cfg.names.join(" ") : "-";
+  els.info.append(dt, dd);
+}
+
 function renderInfo(info, rawInfo, layoutResult) {
   els.info.replaceChildren();
   const rows = [
@@ -548,10 +644,13 @@ function renderInfo(info, rawInfo, layoutResult) {
     ["キー数 (keys)", String(info.keys)],
     ["行 × 列 (rows × cols)", info.rows + " × " + info.cols],
     ["レイヤー数 (layers)", String(info.layers)],
+    ["設定 (cfg)", info.cfg ? "対応" : "なし"],
+    ["レイヤー名の最大の文字数 (lname)", info.cfg ? String(info.lname) : "-"],
+    ["保存 (saved)", info.saved === null ? "-" : info.saved === 1 ? "保存済み" : "保存していない変更あり"],
     ["機種定義 (配列)", describeLayout(layoutResult)],
   ];
   // 知らないキーも、将来の確認用にそのまま表示する
-  const known = new Set(["name", "proto", "fw", "keys", "rows", "cols", "layers"]);
+  const known = new Set(["name", "proto", "fw", "keys", "rows", "cols", "layers", "cfg", "lname", "saved"]);
   for (const k of Object.keys(rawInfo)) {
     if (!known.has(k)) rows.push([k, rawInfo[k]]);
   }
@@ -570,6 +669,7 @@ function capNote(code) {
   if (code === 0x0001) return "透過";
   const k = findKeycode(code);
   if (!k) return "(一覧にない値)";
+  if (isLayerStep(code)) return k.label;
   if (k.cap) return k.cap; // 修飾キー付きは「Shift+A」のように短く
   // レイヤー切り替えは、表示名が長いので、MO(1) のような名前を出す
   if (k.group === "layer") return k.warn ? k.name + "(範囲外)" : k.name;
@@ -692,7 +792,7 @@ function renderLayer(layerIndex, codes, info) {
 // 画面の幅が変わったとき、マスの大きさと表示の形を合わせ直す
 let relayoutQueued = false;
 function relayoutStage() {
-  if (!model || model.caps.length === 0 || relayoutQueued) return;
+  if (!model || model.view === "settings" || model.caps.length === 0 || relayoutQueued) return; // 設定の面では、キーの絵が隠れていて、幅が測れない
   relayoutQueued = true;
   requestAnimationFrame(() => {
     relayoutQueued = false;
@@ -725,10 +825,14 @@ async function loadAll(startLayer) {
     const info = normalizeInfo(rawInfo);
     // 機種定義(キーの位置と幅、既定のレイヤー名)を探して、マスの並びに使う
     const custom = findCustomLayout(info.name);
-    const layoutResult = resolveLayout(info, findDeviceDef(info.name), custom);
+    const def0 = findDeviceDef(info.name);
+    const fileKle = await fetchLayoutFile(info.name); // layouts/<機種名>.json
+    const def = def0 || fileKle ? { layers: def0 ? def0.layers : [], kle: fileKle } : null;
+    const layoutResult = resolveLayout(info, def, custom);
     renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
+    setDeviceLayerStep(info.cfg);
     renderPicker();
 
     const warnings = [];
@@ -740,8 +844,11 @@ async function loadAll(startLayer) {
     }
 
     warnings.push(...layoutResult.warnings);
+    if (layoutResult.origin === "grid" && !(def && def.kle) && custom === null) {
+      warnings.push("この機種のキーの並びがありません。「…」の「配列を読み込む…」で、KLE ファイルを選んでください。");
+    }
 
-    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null };
+    model = { info, codes: [], caps: [], stages: [], sections: [], tabs: null, current: 0, layout: layoutResult, custom, selected: null, deviceUnsaved: info.saved === 0, cfg: null, editingLayer: null, view: "keymap" };
     els.keymapPanel.hidden = false;
     setStageMetrics(computeUnit());
     for (let layer = 0; layer < info.layers; layer++) {
@@ -749,6 +856,12 @@ async function loadAll(startLayer) {
       const codes = parseDumpData(resp.data, info.keys);
       model.codes[layer] = codes;
       renderLayer(layer, codes, info);
+    }
+    // 設定(cfg=1 のファームだけ)。読めなかったときは、設定の機能を使わない
+    if (info.cfg) {
+      model.cfg = await tryReadCfg();
+      renderCfgInfoRow(model.cfg);
+      if (!model.cfg) warnings.push("設定を読めませんでした。設定の機能は使えません。");
     }
     buildTabs();
     // 再読み込みや配列の読み込みでは、見ているレイヤーを保つ(接続したときは、レイヤー 0)
@@ -760,7 +873,9 @@ async function loadAll(startLayer) {
     // 最初の読み込みでは、今の内容を「保存済み」とみなす。再読み込みでは、前の基準を保つ
     if (!baselineFits(model.codes)) baseline = copyCodes(model.codes);
     refreshDirtyMarks();
+    updateUnsavedBanner();
     els.editPanel.hidden = false;
+    applyView();
     renderPicker(); // レイヤー切り替えの欄に、レイヤー名(MAC・EDIT)を出すため、model を作ったあとにも作り直す
 
     setStatus("on", "接続中 (" + info.name + ")");
@@ -863,6 +978,11 @@ const LAYER_KIND_UI = {
   TG: { title: "押すたびに切り替え", desc: "もう一度押すと、元に戻ります" },
   TO: { title: "そのレイヤーへ移る", desc: "そのレイヤーだけを有効にします。押している間の MO は残ります" },
 };
+// 次・前のレイヤー: [値, ボタンの名前, 説明]
+const LAYER_STEP_UI = [
+  [0x7e00, "次のレイヤー", "1つ先へ(空のレイヤーは飛ばす)"],
+  [0x7e01, "前のレイヤー", "1つ前へ(空のレイヤーは飛ばす)"],
+];
 let lkindDefault = "MO"; // keycode がレイヤー切り替えでないときに、切り替え先のボタンを押したときの種類
 let ltargetDefault = 1; // 同じく、種類のボタンを押したときの切り替え先
 
@@ -899,7 +1019,28 @@ function buildLayerPick(usable) {
     btn.append(head, desc);
     els.lkKinds.appendChild(btn);
   }
-  const names = model && model.layout ? model.layout.layerNames : [];
+  // 次・前のレイヤー(対応しているファームだけ。切り替え先は選ばない)
+  if (deviceLayerStep) {
+    for (const [code, name, text] of LAYER_STEP_UI) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lk";
+      btn.dataset.step = String(code);
+      btn.disabled = !usable;
+      const head = document.createElement("span");
+      head.className = "lk-head";
+      const title = document.createElement("span");
+      title.className = "lk-title";
+      title.textContent = name;
+      head.append(title);
+      const desc = document.createElement("span");
+      desc.className = "lk-desc";
+      desc.textContent = text;
+      btn.append(head, desc);
+      els.lkKinds.appendChild(btn);
+    }
+  }
+  const nameOf = (n) => (model && model.layout ? layerName(n) : "");
   for (let n = 0; n < deviceLayers && n <= LAYER_KEY_MAX; n++) {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -910,10 +1051,10 @@ function buildLayerPick(usable) {
     num.className = "lt-num";
     num.textContent = "L" + n;
     btn.appendChild(num);
-    if (names[n]) {
+    if (nameOf(n)) {
       const name = document.createElement("span");
       name.className = "lt-name";
-      name.textContent = names[n];
+      name.textContent = nameOf(n);
       btn.appendChild(name);
     }
     els.lkTargets.appendChild(btn);
@@ -927,8 +1068,14 @@ function updateLayerPick() {
   const lk = p.ok ? decodeLayerKey(p.code) : null;
   const usable = canOperate();
   const effectiveKind = lk ? lk.kind.name : lkindDefault;
+  const step = p.ok && isLayerStep(p.code);
+  // 次・前のレイヤーのときは、切り替え先を出さない
+  els.lkTargets.hidden = step;
+  els.lkTargets.previousElementSibling.hidden = step;
   els.lkKinds.querySelectorAll(".lk").forEach((b) => {
-    const on = lk !== null && b.dataset.kind === lk.kind.name;
+    const on = b.dataset.step !== undefined
+      ? step && Number(b.dataset.step) === p.code
+      : lk !== null && b.dataset.kind === lk.kind.name;
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
   });
@@ -939,6 +1086,12 @@ function updateLayerPick() {
     b.setAttribute("aria-pressed", on ? "true" : "false");
     b.disabled = !usable || (n === 0 && effectiveKind !== "TO");
   });
+}
+
+// 次・前のレイヤーのボタン
+function onLayerStepClick(code) {
+  els.kcHex.value = keycodeHex(code);
+  updatePreview();
 }
 
 // 種類のボタン: 切り替え先は、いまの値を引き継ぐ(L0 は TO 以外で選べないので、そのときは L1)
@@ -994,6 +1147,14 @@ function modState(code) {
   return null;
 }
 
+// チェックボックスの横の名前を、いまの表記(Mac は Option・Cmd など)にする
+function updateModLabels() {
+  for (const span of document.querySelectorAll("#mod-box [data-mod-label]")) {
+    const kind = MOD_KINDS.find((m) => m.bit === Number(span.dataset.modLabel));
+    if (kind) span.textContent = modLabel(kind);
+  }
+}
+
 // チェックボックスを、入力欄の keycode に合わせる。付けられるのは、基本キーだけ。
 // 右側の修飾キー付き(RSFT(KC_A) など)は、チェックの状態だけ見せて、触れなくする(直接入力で変える)
 function updateModBoxes(ms) {
@@ -1020,7 +1181,7 @@ function onModToggle() {
 // 選んだマスの keycode に合わせて、種類のタブとカテゴリを切り替える(名前の検索は空にする)
 function syncPickerTo(code) {
   els.kcSearch.value = "";
-  if (decodeLayerKey(code)) {
+  if (decodeLayerKey(code) || isLayerStep(code)) {
     pickKind = "layer";
   } else {
     pickKind = "key";
@@ -1057,10 +1218,418 @@ function updatePreview() {
   markPicked();
 }
 
+/* ---- 設定の面(いまは LED。OLED とキーの表記は、このあと足す) ---- */
+
+// 効果の名前 → 画面の名前。ここにない名前(ファームが足したもの)は、その名前のまま出す。test は診断用なので出さない
+const LED_MODE_LABELS = { layer: "レイヤーの色", press: "押すと光る", breathe: "ゆっくり変化", off: "消灯" };
+const LED_MODE_HIDDEN = new Set(["test"]);
+const LED_MIN = 10;
+const LED_MAX = 100;
+const LED_STEP = 5;
+// パレット(23色)。見本のとおり。先頭の8色は、レイヤーの初期色を含む
+const LED_PALETTE = [
+  "2060FF", "20D0FF", "20FF40", "C0FF20", "FFD000", "FF8000", "FF2020", "FF2080",
+  "80A0FF", "80E8FF", "80FF98", "E0FF90", "FFE880", "FFB870", "FF9090", "FF90C0",
+  "C040FF", "20FFC0", "60FF20", "FFB000", "FF6040", "FF40C0", "FFFFFF",
+];
+
+// 設定の面の部品(buildSettings が作る)
+const setUi = { built: false, chips: [], ranges: {}, rotChips: [], notChips: [], layers: [], open: -1 };
+
+// 小さな部品を作る
+function makeEl(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// 「キーマップの面」と「設定の面」の、どちらを見せるか(model.view)を、画面に反映する
+function applyView() {
+  if (model !== null && model.view === "settings" && !model.cfg) model.view = "keymap"; // 設定を読めなくなったら、戻す
+  const settings = model !== null && model.view === "settings";
+  els.keymapPanel.hidden = model === null || settings;
+  els.editPanel.hidden = model === null || settings;
+  els.settingsPanel.hidden = !settings;
+  els.btnSettings.hidden = !(model !== null && model.cfg);
+  els.btnSettings.setAttribute("aria-pressed", settings ? "true" : "false");
+  if (model !== null && !settings) relayoutStage();
+}
+
+function setView(view) {
+  if (!model || !canOperate()) return;
+  if (view === "settings" && !model.cfg) return;
+  model.view = view;
+  if (view === "settings") buildSettings();
+  applyView();
+  window.scrollTo(0, 0);
+}
+
+// 設定の面の部品を、通信中は押せなくする(「設定」のボタンも)
+function updateSettingsControls() {
+  const usable = canOperate();
+  els.btnSettings.disabled = !usable;
+  els.btnSettingsBack.disabled = !usable;
+  els.settingsBody.querySelectorAll("button, input").forEach((e) => { e.disabled = !usable; });
+}
+
+// 設定を変えられなかったとき
+function cfgFail(e) {
+  if (transport === null) return;
+  const detail = e instanceof ProtocolError ? "ERR " + e.code + (e.message ? " " + e.message : "") : describeError(e);
+  showSaveMessage("fail", "設定を変えられませんでした(" + detail + ")。");
+  syncSettings();
+}
+
+// 設定を1つ書き換えて、実際の値を読み直す(値を省くと、初期値に戻る)。そのあと、帯を saved に合わせる
+async function setCfg(name, value) {
+  try {
+    clearSaveMessage();
+    await cfgSet(name, value);
+    model.cfg.values[name] = await cfgGet(name);
+    syncSettings();
+    await tryRefreshSaved();
+  } catch (e) {
+    cfgFail(e);
+  }
+}
+
+// スライダーを動かしている間の送り方。名前ごとに、いちばん新しい値だけを、順に送る(送っている間に動いた分は、まとめる)。
+// 送り終わると解決する Promise を返す(送っている最中に呼ぶと、同じ Promise)
+const liveSend = {};
+function sendLive(name, value) {
+  const st = liveSend[name] || (liveSend[name] = { next: null, promise: null });
+  st.next = String(value);
+  if (!st.promise) {
+    st.promise = (async () => {
+      try {
+        while (st.next !== null) {
+          const v = st.next;
+          st.next = null;
+          await cfgSet(name, v);
+        }
+      } finally {
+        st.promise = null;
+      }
+    })();
+  }
+  return st.promise;
+}
+
+// スライダー(led・oled)を動かしている間と、離したとき
+function onRangeInput(name) {
+  const r = setUi.ranges[name];
+  const v = Number(r.range.value);
+  r.val.textContent = v + "%";
+  sendLive(name, v).catch(cfgFail); // 動かしている間も、LED や OLED が変わる
+}
+
+async function onRangeChange(name) {
+  try {
+    clearSaveMessage();
+    await sendLive(name, Number(setUi.ranges[name].range.value));
+    model.cfg.values[name] = await cfgGet(name);
+    syncSettings();
+    await tryRefreshSaved();
+  } catch (e) {
+    cfgFail(e);
+  }
+}
+
+// 設定を、名前ごとに初期値に戻す(値なしで送って、実際の値を読み直す)。キーボードの RAM だけ。SAVE するまで保存されない
+async function resetCfg(names) {
+  try {
+    clearSaveMessage();
+    for (const name of names) {
+      if (!model.cfg.names.includes(name)) continue;
+      await cfgSet(name);
+      model.cfg.values[name] = await cfgGet(name);
+    }
+    syncSettings();
+    await tryRefreshSaved();
+  } catch (e) {
+    cfgFail(e);
+  }
+}
+
+function resetLed() {
+  const names = ["led", "led_mode"];
+  for (let l = 0; l < model.info.layers; l++) names.push("lcolor" + l);
+  return resetCfg(names);
+}
+
+// 色の丸を押したとき: そのレイヤーのパレットを開く(ほかは閉じる)
+function toggleLedPalette(l) {
+  setUi.open = setUi.open === l ? -1 : l;
+  setUi.layers.forEach((row, i) => {
+    if (!row) return;
+    row.pal.hidden = i !== setUi.open;
+    row.btn.setAttribute("aria-expanded", i === setUi.open ? "true" : "false");
+  });
+}
+
+const OLED_ROTATIONS = [0, 90, 180, 270]; // 向き。ツールが知っている(CFG LIST の候補にはない)
+const NOTATION_KEY = "tinykeemap.notation";
+
+// 名前つきのスライダーを作る。戻り値は、節に足す部品([ラベル, 行])
+function makeRange(name, labelText, min, max, hint) {
+  const label = makeEl("div", "set-label");
+  const lab = makeEl("label", "", labelText);
+  lab.htmlFor = "set-" + name;
+  label.append(lab, makeEl("span", "set-range-hint", hint));
+  const row = makeEl("div", "set-range");
+  const range = document.createElement("input");
+  range.type = "range";
+  range.id = "set-" + name;
+  range.min = String(min);
+  range.max = String(max);
+  range.step = String(LED_STEP);
+  range.addEventListener("input", () => onRangeInput(name));
+  range.addEventListener("change", () => onRangeChange(name));
+  const val = makeEl("span", "set-val");
+  row.append(range, val);
+  setUi.ranges[name] = { range, val, min, max };
+  return [label, row];
+}
+
+// 向きのボタンに付ける、回した基板の小さな絵(0° は USB-C が上)
+function makeBoardIcon(deg) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "22");
+  svg.setAttribute("height", "28");
+  svg.setAttribute("viewBox", "0 0 28 28");
+  svg.setAttribute("aria-hidden", "true");
+  const g = document.createElementNS(ns, "g");
+  g.setAttribute("transform", "rotate(" + deg + " 14 14)");
+  const body = document.createElementNS(ns, "rect");
+  for (const [k, val] of [["x", "8"], ["y", "3"], ["width", "12"], ["height", "22"], ["rx", "2"], ["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "1.5"]]) body.setAttribute(k, val);
+  const usb = document.createElementNS(ns, "rect");
+  for (const [k, val] of [["x", "11"], ["y", "3"], ["width", "6"], ["height", "3"], ["fill", "currentColor"]]) usb.setAttribute(k, val);
+  g.append(body, usb);
+  svg.append(g);
+  return svg;
+}
+
+// キーの表記を切り替える("auto" / "mac" / "win")。ブラウザに保存する(使えないときは、このページを開いている間だけ)
+function setNotation(mode) {
+  setNotationMode(mode);
+  try {
+    localStorage.setItem(NOTATION_KEY, notationMode);
+  } catch (e) {
+    /* 保存できなくても、このページを閉じるまでは使える */
+  }
+  refreshNotation();
+  syncSettings();
+}
+
+// 保存してある表記の選び方を、起動したときに読む
+function loadNotation() {
+  try {
+    const saved = localStorage.getItem(NOTATION_KEY);
+    if (saved) setNotationMode(saved);
+  } catch (e) {
+    /* 読めなければ、自動 */
+  }
+}
+
+// 表記が変わったとき、表記を使っているところを、すべて作り直す
+function refreshNotation() {
+  updateModLabels();
+  if (model) {
+    model.caps.forEach((row, l) => row.forEach((cap, i) => {
+      if (cap) fillCap(cap, l, i, model.codes[l][i]);
+    }));
+    refreshDirtyMarks();
+  }
+  updatePreview();
+  renderPicker();
+}
+
+// 設定の面を、いまの設定(model.cfg)から作る。入るたびと、LOAD のあとに作り直す
+function buildSettings() {
+  const cfg = model.cfg;
+  els.settingsBody.replaceChildren();
+  setUi.chips = [];
+  setUi.ranges = {};
+  setUi.rotChips = [];
+  setUi.notChips = [];
+  setUi.layers = [];
+  setUi.open = -1;
+  const has = (name) => cfg.names.includes(name);
+
+  const sec = makeEl("section", "set-sec");
+  sec.setAttribute("aria-label", "LED");
+  const head = makeEl("div", "set-sec-head");
+  head.append(makeEl("h3", "", "LED"));
+  const reset = makeEl("button", "btn-line", "初期値に戻す");
+  reset.type = "button";
+  reset.addEventListener("click", resetLed);
+  head.append(reset);
+  sec.append(head);
+
+  // 効果(候補は CFG LIST から)
+  if (has("led_mode")) {
+    sec.append(makeEl("div", "set-label", "効果"));
+    const chips = makeEl("div", "set-chips");
+    for (const name of cfg.options.led_mode || []) {
+      if (LED_MODE_HIDDEN.has(name)) continue;
+      const b = makeEl("button", "set-chip", LED_MODE_LABELS[name] || name);
+      b.type = "button";
+      b.dataset.value = name;
+      b.addEventListener("click", () => { if (cfg.values.led_mode !== name) setCfg("led_mode", name); });
+      chips.append(b);
+      setUi.chips.push(b);
+    }
+    sec.append(chips);
+  }
+
+  // 明るさ
+  if (has("led")) sec.append(...makeRange("led", "明るさ", LED_MIN, LED_MAX, LED_MIN + "% 〜 " + LED_MAX + "%"));
+
+  // レイヤーごとの色
+  const colorLayers = [];
+  for (let l = 0; l < model.info.layers; l++) if (has("lcolor" + l)) colorLayers.push(l);
+  if (colorLayers.length > 0) {
+    sec.append(makeEl("div", "set-label", "レイヤーの色"));
+    const list = makeEl("div", "");
+    list.style.marginTop = "4px";
+    for (const l of colorLayers) {
+      const row = makeEl("div", "set-layer");
+      const nameEl = makeEl("div", "set-layer-name");
+      const btn = makeEl("button", "set-colorbtn");
+      btn.type = "button";
+      btn.setAttribute("aria-label", "L" + l + " の色を選ぶ");
+      btn.setAttribute("aria-haspopup", "true");
+      btn.setAttribute("aria-expanded", "false");
+      const dot = makeEl("span", "set-dot");
+      btn.append(dot, makeEl("span", "caret", "▾"));
+      btn.addEventListener("click", () => toggleLedPalette(l));
+      row.append(nameEl, btn);
+      list.append(row);
+
+      const pal = makeEl("div", "set-pal");
+      pal.hidden = true;
+      pal.setAttribute("role", "group");
+      pal.setAttribute("aria-label", "L" + l + " の色");
+      const sws = LED_PALETTE.map((hex) => {
+        const sw = makeEl("button", "set-sw");
+        sw.type = "button";
+        sw.style.background = "#" + hex;
+        sw.setAttribute("aria-label", "#" + hex);
+        sw.dataset.hex = hex;
+        sw.addEventListener("click", () => setCfg("lcolor" + l, hex));
+        pal.append(sw);
+        return sw;
+      });
+      const hexRow = makeEl("div", "set-hex");
+      const hexLabel = makeEl("label", "", "色コード");
+      const input = document.createElement("input");
+      input.type = "text";
+      input.id = "set-hex" + l;
+      input.maxLength = 6;
+      input.spellcheck = false;
+      input.autocomplete = "off";
+      hexLabel.htmlFor = input.id;
+      input.addEventListener("input", () => {
+        const fixed = input.value.toUpperCase().replace(/[^0-9A-F]/g, "");
+        if (fixed !== input.value) input.value = fixed;
+        if (fixed.length === 6 && fixed !== cfg.values["lcolor" + l]) setCfg("lcolor" + l, fixed);
+      });
+      hexRow.append(hexLabel, makeEl("span", "hash", "#"), input);
+      pal.append(hexRow);
+      list.append(pal);
+      setUi.layers[l] = { nameEl, btn, dot, pal, sws, input };
+    }
+    sec.append(list);
+  }
+
+  els.settingsBody.append(sec);
+
+  // OLED
+  if (has("oled") || has("rotate")) {
+    const osec = makeEl("section", "set-sec");
+    osec.setAttribute("aria-label", "OLED");
+    const ohead = makeEl("div", "set-sec-head");
+    ohead.append(makeEl("h3", "", "OLED"));
+    const oreset = makeEl("button", "btn-line", "初期値に戻す");
+    oreset.type = "button";
+    oreset.addEventListener("click", () => resetCfg(["oled", "rotate"]));
+    ohead.append(oreset);
+    osec.append(ohead);
+    if (has("oled")) osec.append(...makeRange("oled", "明るさ", 0, 100, "0% 〜 100%(0% は消灯)"));
+    if (has("rotate")) {
+      osec.append(makeEl("div", "set-label", "向き(回転)"));
+      const chips = makeEl("div", "set-chips");
+      for (const deg of OLED_ROTATIONS) {
+        const b = makeEl("button", "set-chip set-rot");
+        b.type = "button";
+        b.dataset.value = String(deg);
+        b.append(makeBoardIcon(deg), document.createTextNode(deg + "°"));
+        b.addEventListener("click", () => { if (cfg.values.rotate !== String(deg)) setCfg("rotate", String(deg)); });
+        chips.append(b);
+        setUi.rotChips.push(b);
+      }
+      osec.append(chips);
+    }
+    els.settingsBody.append(osec);
+  }
+
+  // キーの表記(ブラウザに保存。キーボードには書かない)
+  const nsec = makeEl("section", "set-sec");
+  nsec.setAttribute("aria-label", "表記");
+  nsec.append(makeEl("h3", "", "キーの表記"));
+  const nchips = makeEl("div", "set-chips");
+  nchips.style.marginTop = "14px";
+  const autoName = { mac: "Mac", win: "Windows", other: "その他" }[detectOs()];
+  for (const [mode, text] of [["auto", "自動(" + autoName + ")"], ["mac", "Mac"], ["win", "Windows"]]) {
+    const b = makeEl("button", "set-chip", text);
+    b.type = "button";
+    b.dataset.value = mode;
+    b.addEventListener("click", () => setNotation(mode));
+    nchips.append(b);
+    setUi.notChips.push(b);
+  }
+  nsec.append(nchips);
+  const sample = makeEl("div", "set-sample");
+  const tag = (t) => makeEl("span", "set-tag", t);
+  sample.append(tag("GUI"), makeEl("span", "", "→"), makeEl("span", "", "Mac"), tag("⌘ / Cmd"), makeEl("span", "set-sample-gap", "Windows"), tag("Win"));
+  nsec.append(sample);
+  els.settingsBody.append(nsec);
+
+  setUi.built = true;
+  syncSettings();
+  updateSettingsControls();
+}
+
+// 設定の面の表示を、いまの値(model.cfg.values)に合わせる。部品は作り直さない(入力中の欄を壊さないため)
+function syncSettings() {
+  if (!setUi.built || !model || !model.cfg) return;
+  const v = model.cfg.values;
+  for (const b of setUi.chips) b.setAttribute("aria-pressed", b.dataset.value === v.led_mode ? "true" : "false");
+  for (const [name, r] of Object.entries(setUi.ranges)) {
+    const n = Number(v[name]);
+    if (!Number.isFinite(n) || v[name] === "") continue;
+    if (document.activeElement !== r.range) r.range.value = String(Math.min(r.max, Math.max(r.min, n)));
+    r.val.textContent = n + "%";
+  }
+  for (const b of setUi.rotChips) b.setAttribute("aria-pressed", b.dataset.value === v.rotate ? "true" : "false");
+  for (const b of setUi.notChips) b.setAttribute("aria-pressed", b.dataset.value === notationMode ? "true" : "false");
+  setUi.layers.forEach((row, l) => {
+    if (!row) return;
+    const hex = (v["lcolor" + l] || "").toUpperCase();
+    row.dot.style.background = /^[0-9A-F]{6}$/.test(hex) ? "#" + hex : "transparent";
+    for (const sw of row.sws) sw.setAttribute("aria-pressed", sw.dataset.hex === hex ? "true" : "false");
+    if (document.activeElement !== row.input) row.input.value = hex;
+    const name = layerName(l);
+    row.nameEl.replaceChildren(makeEl("span", "num", "L" + l), makeEl("span", name ? "" : "none", name || "名前なし"));
+  });
+}
+
 /* ---- レイヤーのタブ ---- */
 
 function buildTabs() {
-  els.layerTabs.querySelectorAll(".tab").forEach((t) => t.remove());
+  els.layerTabs.querySelectorAll(".tab, .tab-edit").forEach((t) => t.remove());
   model.tabs = model.codes.map((_, l) => {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -1075,24 +1644,135 @@ function buildTabs() {
     dot.setAttribute("role", "img");
     dot.setAttribute("aria-label", "未保存の変更あり");
     btn.append(num, name, dot);
-    btn.addEventListener("click", () => setCurrentLayer(l));
+    btn.addEventListener("click", () => {
+      // 選んでいるタブをもう一度押すと、名前を書き換えられる(設定に対応したファームだけ)
+      if (l === model.current && canEditLayerName(l)) startLayerNameEdit(l);
+      else setCurrentLayer(l);
+    });
     els.layerTabs.appendChild(btn);
     return { btn, name, dot };
   });
   updateTabs();
 }
 
-// 名前と「空」と ● を更新する。名前は機種定義の既定の名前。名前がなくて、中身がすべて「透過」なら「空」
+// レイヤー名。設定に対応したファーム(cfg=1)は、設定の lname<n>。対応していないファームは、機種定義の既定の名前。
+// 名前がないときは ""
+function layerName(l) {
+  if (model.cfg && Object.prototype.hasOwnProperty.call(model.cfg.values, "lname" + l)) return model.cfg.values["lname" + l];
+  return model.layout.layerNames[l] || "";
+}
+
+// そのレイヤーの名前を、書き換えられるか
+function canEditLayerName(l) {
+  return canOperate() && model.cfg !== null && model.info.lname > 0 && model.cfg.names.includes("lname" + l);
+}
+
+// 名前の入力欄を出す。タブのボタンは隠して、同じ場所に、番号と入力欄を置く
+function startLayerNameEdit(l) {
+  if (model.editingLayer !== null) return;
+  model.editingLayer = l;
+  const t = model.tabs[l];
+  const wrap = document.createElement("span");
+  wrap.className = "tab-edit";
+  const num = document.createElement("span");
+  num.className = "tab-num";
+  num.textContent = String(l);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "tab-input";
+  input.maxLength = model.info.lname;
+  input.style.width = "calc(" + (model.info.lname + 1) + "ch + 16px)";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.setAttribute("aria-label", "レイヤー " + l + " の名前(英大文字・数字・-・_ で " + model.info.lname + " 文字まで。Enter で決定、Esc でやめる)");
+  input.value = layerName(l);
+  wrap.append(num, input);
+  els.layerTabs.insertBefore(wrap, t.btn);
+  t.btn.hidden = true;
+
+  let finished = false;
+  const finish = (commit) => {
+    if (finished) return;
+    finished = true;
+    const text = input.value;
+    wrap.remove();
+    t.btn.hidden = false;
+    model.editingLayer = null;
+    t.btn.focus();
+    if (commit) commitLayerName(l, text);
+  };
+  // 使えない文字は、打った時点で取り除く(小文字は大文字にする)。日本語入力の変換中は、そのまま
+  input.addEventListener("input", (ev) => {
+    if (ev.isComposing) return;
+    const fixed = input.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+    if (fixed !== input.value) input.value = fixed;
+  });
+  input.addEventListener("compositionend", () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, model.info.lname);
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.isComposing) return;
+    if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
+    else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(false)); // 別の場所を押したときは、やめる
+  input.focus();
+  input.select();
+}
+
+// レイヤー名を、デバイスに送る(RAM だけ。確定は SAVE)。空にすると、その名前の初期値に戻る(L0 は MAC、L1 は EDIT、ほかは空)
+async function commitLayerName(l, text) {
+  if (!canOperate()) return;
+  const key = "lname" + l;
+  if (text === model.cfg.values[key]) return;
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  try {
+    await cfgSet(key, text);
+    model.cfg.values[key] = await cfgGet(key); // 実際の値を読み直す(空にしたときは、初期値)
+    await tryRefreshSaved();
+  } catch (e) {
+    if (transport === null) return;
+    if (e instanceof ProtocolError && e.code === "BADARG") showSaveMessage("fail", "この名前は使えません(ERR " + e.code + (e.message ? " " + e.message : "") + ")。");
+    else showSaveMessage("fail", "名前を変えられませんでした。" + describeError(e));
+  } finally {
+    busy = false;
+    updateButtons();
+    updateTabs();
+    renderPicker(); // レイヤー切り替えの欄の名前も、合わせる
+  }
+}
+
+// INFO を読み直して、「保存していない変更」の帯を、キーボードの答え(saved)に合わせる
+async function refreshSaved() {
+  const info = normalizeInfo(parseInfoData((await request("INFO")).data));
+  model.deviceUnsaved = info.saved === 0;
+  updateUnsavedBanner();
+}
+
+// refreshSaved の、失敗しても投げない版。変更そのものは成功しているので、読み直せなくても、成功を失敗に見せない
+// (通信が止まっていれば、次のコマンドで分かる)
+async function tryRefreshSaved() {
+  try {
+    await refreshSaved();
+  } catch (e) {
+    if (transport !== null) log("bad", "! saved を読み直せませんでした: " + e.message);
+  }
+}
+
+// 名前と「空」と ● を更新する。名前は layerName の名前。名前がなくて、中身がすべて「透過」なら「空」
 function updateTabs() {
   if (!model || !model.tabs) return;
   const fit = baselineFits(model.codes);
   model.tabs.forEach((t, l) => {
     const codes = model.codes[l];
     const empty = codes.every((c) => c === 0x0001);
-    const label = model.layout.layerNames[l] || (empty ? "空" : "");
+    const label = layerName(l) || (empty ? "空" : "");
     const changed = fit && codes.some((c, i) => c !== baseline[l][i]);
     const active = l === model.current;
     t.name.textContent = label;
+    t.btn.title = canEditLayerName(l) && l === model.current ? "もう一度押すと、名前を変えられます" : "";
     t.dot.hidden = !changed;
     t.btn.classList.toggle("active", active);
     t.btn.setAttribute("aria-pressed", active ? "true" : "false");
@@ -1230,6 +1910,7 @@ async function doEdit(isRevert) {
     model.codes[layer][index] = code;
     fillCap(cap, layer, index, code);
     refreshDirtyMarks();
+    await tryRefreshSaved(); // 帯を、キーボードの答え(saved)に合わせる
     showEditMessage("ok", isRevert ? where + " を元に戻しました。" : where + " を " + keyName(code) + " に変更しました。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
@@ -1322,6 +2003,11 @@ function refreshDirtyMarks() {
   els.dirtyBadge.textContent = n > 0 ? "● 未保存の変更 " + n : "";
 }
 
+// 「保存していない変更があります」の帯。キーボードが saved=0 と答えたときだけ出す(SAVE か LOAD が成功すると消える)
+function updateUnsavedBanner() {
+  els.unsavedBanner.hidden = !(model !== null && model.deviceUnsaved);
+}
+
 function showSaveMessage(kind, text) {
   els.saveMsg.className = "edit-msg " + kind; // kind: ok / fail / info
   els.saveMsg.textContent = text;
@@ -1394,7 +2080,7 @@ function showSaveError(cmd, e) {
     const detail = "ERR " + e.code + (e.message ? " " + e.message : "");
     if (e.code === "FLASH" && cmd === "SAVE") {
       msg = "保存に失敗しました(" + detail + ")。Flash の内容が壊れた可能性があり、次に電源を入れたとき初期キーマップに戻ることがあります。" +
-        "今のキーマップはキーボードの RAM に残っていて、そのまま使えます。原因を確認してから、もう一度「保存する」を試してください(自動では再試行しません)。";
+        "今のキーマップはキーボードの RAM に残っていて、そのまま使えます。原因を確認してから、もう一度「SAVE」を試してください(自動では再試行しません)。";
     } else if (e.code === "FLASH" && cmd === "LOAD") {
       msg = "読み直せませんでした(" + detail + ")。Flash に有効な保存データがありません。キーボードの内容は変わっていません。";
     } else if (e.code === "BADCMD") {
@@ -1416,7 +2102,7 @@ function showSaveError(cmd, e) {
 // 今のキーマップを Flash に保存する(1クリックにつき SAVE は1回だけ。自動で繰り返さない)
 async function doSave() {
   if (!canOperate()) return;
-  if (changedCount() === 0 && !window.confirm(
+  if (changedCount() === 0 && !model.deviceUnsaved && !window.confirm(
     "変更はありません(保存済みと同じ内容のはずです)。\nそれでも Flash に書き込みますか?\n\nFlash は書き換え回数に限りがあるので、必要なときだけ保存してください。")) return;
   busy = true;
   updateButtons();
@@ -1425,7 +2111,9 @@ async function doSave() {
   try {
     const r = await sendStateCommand("SAVE");
     baseline = copyCodes(model.codes);
+    model.deviceUnsaved = false;
     refreshDirtyMarks();
+    updateUnsavedBanner();
     showSaveMessage("ok", (r.late ? "応答は遅れましたが、" : "") + "保存しました。電源を入れ直しても、この内容で起動します。");
   } catch (e) {
     if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
@@ -1441,6 +2129,7 @@ async function doLoad() {
   if (!canOperate()) return;
   const n = changedCount();
   if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n読み直すと、これらの変更は破棄されます。続けますか?")) return;
+  if (n === 0 && model.deviceUnsaved && !window.confirm("保存していない変更があります。\n読み直すと、破棄されます。続けますか?")) return;
   busy = true;
   updateButtons();
   clearSaveMessage();
@@ -1449,8 +2138,16 @@ async function doLoad() {
     await sendStateCommand("LOAD");
     const codes = await readAllCodes();
     applyCodes(codes);
+    if (model.info.cfg) {
+      model.cfg = await tryReadCfg();
+      renderCfgInfoRow(model.cfg);
+      if (model.view === "settings" && model.cfg) buildSettings(); // 読み直した値で、設定の面を作り直す
+      applyView();
+    }
     baseline = copyCodes(codes);
+    model.deviceUnsaved = false;
     refreshDirtyMarks();
+    updateUnsavedBanner();
     showSaveMessage("ok", "保存済みの内容を読み込みました。");
   } catch (e) {
     if (transport === null) return;
@@ -1472,8 +2169,9 @@ async function doReset() {
     await sendStateCommand("RESET");
     const codes = await readAllCodes();
     applyCodes(codes);
+    await tryRefreshSaved();
     showSaveMessage("ok", "初期キーマップに戻しました。まだ保存していません。" +
-      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「読み直す」を押してください。" : ""));
+      (changedCount() > 0 ? "保存済みの内容とは違います。元に戻すには「LOAD」を押してください。" : ""));
   } catch (e) {
     if (transport === null) return;
     showSaveError("RESET", e);
@@ -1568,12 +2266,15 @@ async function connect() {
   updateButtons(); // 未接続の画面を隠す
   log("dbg", "(接続しました)");
   await loadAll();
+  await applyPendingShare(); // リンクで開いたときだけ
 }
 
 async function disconnect() {
   if (!transport) return;
   const n = changedCount();
-  if (n > 0 && !window.confirm("未保存の変更が " + n + " キーあります。\n切断してもキーボードには残りますが、保存はされません。また、このツールでは「未保存」かどうか分からなくなります。切断しますか?")) return;
+  const unsaved = n > 0 || (model !== null && model.deviceUnsaved);
+  // つなぎ直すと、キーボードの saved で、帯がまた出る。切断しても、キーボードには残る
+  if (unsaved && !window.confirm((n > 0 ? "未保存の変更が " + n + " キーあります。" : "保存していない変更があります。") + "\n切断してもキーボードには残りますが、保存はされません。切断しますか?")) return;
   await transport.close();
 }
 
@@ -1625,6 +2326,199 @@ async function clearCustomLayout() {
   if (model !== null) showSaveMessage("ok", "読み込んだ配列を消しました。");
 }
 
+/* ---- リンクで共有(#k1=...) ---- */
+// 形: #k1=<base64url>。入れるのは、機種名・レイヤー数・キー数・全レイヤーの keycode だけ(設定は入れない)。
+//   バイト列: [機種名の長さ 1][機種名(UTF-8)][レイヤー数 1][キー数 2(上位が先)][keycode 2バイトずつ(上位が先)。レイヤー順、index 順]
+//   形を変えるときは、k2 にする(k1 は、そのまま読めるようにしておく)。
+
+function bytesToBase64Url(bytes) {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64UrlToBytes(text) {
+  if (!/^[A-Za-z0-9_-]*$/.test(text)) throw new Error("リンクの文字が正しくありません");
+  let b64 = text.replace(/-/g, "+").replace(/_/g, "/");
+  while (b64.length % 4 !== 0) b64 += "=";
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// { name, layers, keys, codes: [レイヤー][index] } → "k1=..."
+function encodeShare(share) {
+  const nameBytes = new TextEncoder().encode(share.name);
+  if (nameBytes.length === 0 || nameBytes.length > 255) throw new Error("機種名の長さが正しくありません");
+  if (share.layers < 1 || share.layers > 255 || share.keys < 1 || share.keys > 65535) throw new Error("レイヤー数・キー数が範囲外です");
+  const bytes = [nameBytes.length, ...nameBytes, share.layers, share.keys >> 8, share.keys & 0xff];
+  for (let l = 0; l < share.layers; l++) {
+    for (let i = 0; i < share.keys; i++) {
+      const code = share.codes[l][i];
+      if (!Number.isInteger(code) || code < 0 || code > 0xffff) throw new Error("keycode が範囲外です");
+      bytes.push(code >> 8, code & 0xff);
+    }
+  }
+  return "k1=" + bytesToBase64Url(bytes);
+}
+
+// "k1=..." の「=」のあと(base64url)を読む。読めないときは、Error(理由)
+function decodeShare(b64) {
+  const bytes = base64UrlToBytes(b64);
+  const bad = () => new Error("リンクの内容が正しくありません");
+  if (bytes.length < 1) throw bad();
+  const nameLen = bytes[0];
+  let pos = 1 + nameLen;
+  if (nameLen === 0 || bytes.length < pos + 3) throw bad();
+  let name;
+  try {
+    name = new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(1, pos));
+  } catch (e) {
+    throw bad();
+  }
+  const layers = bytes[pos];
+  const keys = (bytes[pos + 1] << 8) | bytes[pos + 2];
+  pos += 3;
+  if (layers < 1 || keys < 1 || bytes.length !== pos + layers * keys * 2) throw bad();
+  const codes = [];
+  for (let l = 0; l < layers; l++) {
+    const row = [];
+    for (let i = 0; i < keys; i++) {
+      row.push((bytes[pos] << 8) | bytes[pos + 1]);
+      pos += 2;
+    }
+    codes.push(row);
+  }
+  return { name, layers, keys, codes };
+}
+
+// いまのキーボードのキーマップ(未保存の変更も含む)を、リンクにする
+function buildShareUrl() {
+  const info = model.info;
+  const part = encodeShare({ name: info.name, layers: info.layers, keys: info.keys, codes: model.codes });
+  return pageUrl() + "#" + part;
+}
+
+// 「…」メニューの「リンクをコピー」
+async function copyShareLink() {
+  if (!canOperate()) return;
+  clearError();
+  let url;
+  try {
+    url = buildShareUrl();
+  } catch (e) {
+    showSaveMessage("fail", "リンクを作れませんでした: " + e.message);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showSaveMessage("ok", "リンクをコピーしました。");
+  } catch (e) {
+    showSaveMessage("info", "コピーできませんでした。次のリンクを、手で選んでコピーしてください。\n" + url); // 許可されていないとき、など
+  }
+}
+
+// ---- 開いたときの反映 ----
+// リンク(#k1=...)で開いたとき: 接続していて、機種名・レイヤー数・キー数が合えば、SET だけで RAM に反映する
+//   (未保存の変更として扱う。SAVE は、押したときだけ)。合わなければ反映せず、理由を出す。未接続なら、接続を待つ。
+
+let pendingShare = null; // 反映待ちのリンクの内容(なければ null)
+
+function clearShareHash() {
+  if (location.hash !== "") history.replaceState(null, "", location.pathname + location.search);
+}
+
+// いまのアドレスの # を読む。戻り値: "none"(共有のリンクではない)| "wait"(反映待ち)| "error"(読めない。画面に出した)
+function readShareHash() {
+  const m = /^#(k\d+)=(.*)$/.exec(location.hash);
+  if (m === null) return "none";
+  pendingShare = null;
+  if (m[1] !== "k1") {
+    showSaveMessage("fail", "このリンクの形(" + m[1] + ")は、このツールでは読めません。ツールを新しくしてください。");
+    clearShareHash();
+    return "error";
+  }
+  try {
+    pendingShare = decodeShare(m[2]);
+  } catch (e) {
+    showSaveMessage("fail", "リンクを読めませんでした: " + e.message);
+    clearShareHash();
+    return "error";
+  }
+  return "wait";
+}
+
+// 接続しているキーボードに合うかを確かめる。戻り値: 合わない理由の文(合えば "")
+function shareMismatch(share, info) {
+  if (String(share.name).toLowerCase() !== String(info.name).toLowerCase()) {
+    return "リンクは「" + share.name + "」用です。接続しているのは「" + info.name + "」です。";
+  }
+  if (share.layers !== info.layers) {
+    return "リンクのレイヤー数(" + share.layers + ")が、キーボード(" + info.layers + ")と合いません。";
+  }
+  if (share.keys !== info.keys) {
+    return "リンクのキー数(" + share.keys + ")が、キーボード(" + info.keys + ")と合いません。";
+  }
+  return "";
+}
+
+async function applyPendingShare() {
+  if (pendingShare === null || !canOperate()) return; // 未接続・通信中は、待つ
+  const share = pendingShare;
+  pendingShare = null;
+  clearShareHash();
+  clearError();
+  const reason = shareMismatch(share, model.info);
+  if (reason !== "") {
+    showSaveMessage("fail", "リンクのキーマップは、反映しませんでした。\n" + reason);
+    return;
+  }
+  const diffs = [];
+  for (let l = 0; l < share.layers; l++) {
+    for (let i = 0; i < share.keys; i++) {
+      if (share.codes[l][i] !== model.codes[l][i]) diffs.push([l, i, share.codes[l][i]]);
+    }
+  }
+  if (diffs.length === 0) {
+    showSaveMessage("info", "リンクのキーマップは、いまの内容と同じです。");
+    return;
+  }
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  let done = 0;
+  let failure = "";
+  try {
+    for (const [l, i, code] of diffs) {
+      try {
+        await request("SET " + l + " " + i + " " + hex4(code));
+      } catch (e) {
+        if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
+        const where = "レイヤー " + l + " / キー " + i;
+        failure = e instanceof ProtocolError && e.code === "BADARG"
+          ? where + ": デバイスが " + keycodeHex(code) + " に対応していません。"
+          : where + ": " + describeError(e);
+        break;
+      }
+      model.codes[l][i] = code;
+      const cap = model.caps[l][i];
+      if (cap) fillCap(cap, l, i, code);
+      done++;
+    }
+  } finally {
+    busy = false;
+    updateButtons();
+  }
+  refreshDirtyMarks();
+  await tryRefreshSaved();
+  if (failure === "") {
+    showSaveMessage("ok", "リンクのキーマップを反映しました(" + done + " 個のキーが変わりました)。「SAVE」を押すと保存されます。");
+  } else {
+    showSaveMessage("fail", "リンクの反映を、途中でやめました(" + done + " / " + diffs.length + " 個)。\n" + failure);
+  }
+}
+
 /* ---- 上の1行: 「…」メニューと、確認の小窓 ---- */
 
 let detailOpen = false;
@@ -1664,7 +2558,7 @@ function setDirectOpen(open) {
 function askReset() {
   if (!canOperate()) return;
   const n = changedCount();
-  els.resetConfirmText.textContent = "「保存する」を押すまでは、キーボードの保存内容は変わりません。" +
+  els.resetConfirmText.textContent = "「SAVE」を押すまでは、キーボードの保存内容は変わりません。" +
     (n > 0 ? "\n未保存の変更 " + n + " キーは、破棄されます。" : "");
   els.resetConfirm.hidden = false;
   els.resetCancel.focus();
@@ -1682,6 +2576,7 @@ function initTopBar() {
   els.menuReset.addEventListener("click", askReset);
   els.menuDetail.addEventListener("click", () => setDetailOpen(!detailOpen));
   els.menuDirect.addEventListener("click", () => setDirectOpen(els.kcDirect.hidden));
+  els.menuShare.addEventListener("click", copyShareLink);
   els.menuLayout.addEventListener("click", askLayoutFile);
   els.menuLayoutClear.addEventListener("click", clearCustomLayout);
   els.layoutFile.addEventListener("change", onLayoutFileChosen);
@@ -1716,11 +2611,29 @@ function init() {
     setWelcome("unsupported");
     return;
   }
+  // リンク(#k1=...)で開いたとき: 接続を待って、反映する
+  if (readShareHash() === "wait") showSaveMessage("info", "リンクのキーマップがあります。キーボードをつなぐと、反映します。");
+  window.addEventListener("hashchange", () => {
+    if (readShareHash() === "wait") {
+      if (canOperate()) applyPendingShare();
+      else if (model === null) showSaveMessage("info", "リンクのキーマップがあります。キーボードをつなぐと、反映します。");
+      else { // 通信中: 待たずに、やめる
+        pendingShare = null;
+        clearShareHash();
+        showSaveMessage("info", "通信中のため、リンクのキーマップは反映しませんでした。終わってから、もう一度開いてください。");
+      }
+    }
+  });
   window.addEventListener("resize", relayoutStage);
   els.connect.addEventListener("click", connect);
   els.reload.addEventListener("click", () => loadAll(model ? model.current : 0));
   els.disconnect.addEventListener("click", disconnect);
+  // 設定の面
+  els.btnSettings.addEventListener("click", () => setView(model && model.view === "settings" ? "keymap" : "settings"));
+  els.btnSettingsBack.addEventListener("click", () => setView("keymap"));
   // 編集欄
+  loadNotation();
+  updateModLabels();
   renderPicker();
   els.kcSearch.addEventListener("input", renderPicker);
   els.kindKey.addEventListener("click", () => { pickKind = "key"; renderPicker(); });
@@ -1746,7 +2659,9 @@ function init() {
   });
   els.lkKinds.addEventListener("click", (ev) => {
     const b = ev.target.closest(".lk");
-    if (b && !b.disabled) onLayerKindClick(b.dataset.kind);
+    if (!b || b.disabled) return;
+    if (b.dataset.step !== undefined) onLayerStepClick(Number(b.dataset.step));
+    else onLayerKindClick(b.dataset.kind);
   });
   els.lkTargets.addEventListener("click", (ev) => {
     const b = ev.target.closest(".lt");
