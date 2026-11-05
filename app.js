@@ -414,7 +414,7 @@ function setWelcome(mode, reason) {
   els.welcomeUnsupported.hidden = !unsupported;
   els.welcomeHelp.hidden = unsupported;
   els.conn.hidden = unsupported;
-  if (unsupported) els.welcomeUrl.textContent = pageUrl();
+  if (unsupported) els.welcomeUrl.textContent = pageUrl() + location.hash;
   else setStatus(mode === "busy" ? "busy" : "off", mode === "busy" ? "接続中…" : "未接続");
   els.welcome.hidden = false;
   document.body.classList.add("is-off");
@@ -426,7 +426,7 @@ function copyPageUrl() {
     setTimeout(() => { els.btnCopyUrl.textContent = "リンクをコピー"; }, 2000);
   };
   if (!navigator.clipboard) { done("コピーできません"); return; }
-  navigator.clipboard.writeText(pageUrl()).then(() => done("コピーしました"), () => done("コピーできません"));
+  navigator.clipboard.writeText(pageUrl() + location.hash).then(() => done("コピーしました"), () => done("コピーできません"));
 }
 
 function showError(message, isWarning) {
@@ -2266,6 +2266,7 @@ async function connect() {
   updateButtons(); // 未接続の画面を隠す
   log("dbg", "(接続しました)");
   await loadAll();
+  await applyPendingShare(); // リンクで開いたときだけ
 }
 
 async function disconnect() {
@@ -2418,6 +2419,106 @@ async function copyShareLink() {
   }
 }
 
+// ---- 開いたときの反映 ----
+// リンク(#k1=...)で開いたとき: 接続していて、機種名・レイヤー数・キー数が合えば、SET だけで RAM に反映する
+//   (未保存の変更として扱う。SAVE は、押したときだけ)。合わなければ反映せず、理由を出す。未接続なら、接続を待つ。
+
+let pendingShare = null; // 反映待ちのリンクの内容(なければ null)
+
+function clearShareHash() {
+  if (location.hash !== "") history.replaceState(null, "", location.pathname + location.search);
+}
+
+// いまのアドレスの # を読む。戻り値: "none"(共有のリンクではない)| "wait"(反映待ち)| "error"(読めない。画面に出した)
+function readShareHash() {
+  const m = /^#(k\d+)=(.*)$/.exec(location.hash);
+  if (m === null) return "none";
+  pendingShare = null;
+  if (m[1] !== "k1") {
+    showSaveMessage("fail", "このリンクの形(" + m[1] + ")は、このツールでは読めません。ツールを新しくしてください。");
+    clearShareHash();
+    return "error";
+  }
+  try {
+    pendingShare = decodeShare(m[2]);
+  } catch (e) {
+    showSaveMessage("fail", "リンクを読めませんでした: " + e.message);
+    clearShareHash();
+    return "error";
+  }
+  return "wait";
+}
+
+// 接続しているキーボードに合うかを確かめる。戻り値: 合わない理由の文(合えば "")
+function shareMismatch(share, info) {
+  if (String(share.name).toLowerCase() !== String(info.name).toLowerCase()) {
+    return "リンクは「" + share.name + "」用です。接続しているのは「" + info.name + "」です。";
+  }
+  if (share.layers !== info.layers) {
+    return "リンクのレイヤー数(" + share.layers + ")が、キーボード(" + info.layers + ")と合いません。";
+  }
+  if (share.keys !== info.keys) {
+    return "リンクのキー数(" + share.keys + ")が、キーボード(" + info.keys + ")と合いません。";
+  }
+  return "";
+}
+
+async function applyPendingShare() {
+  if (pendingShare === null || !canOperate()) return; // 未接続・通信中は、待つ
+  const share = pendingShare;
+  pendingShare = null;
+  clearShareHash();
+  clearError();
+  const reason = shareMismatch(share, model.info);
+  if (reason !== "") {
+    showSaveMessage("fail", "リンクのキーマップは、反映しませんでした。\n" + reason);
+    return;
+  }
+  const diffs = [];
+  for (let l = 0; l < share.layers; l++) {
+    for (let i = 0; i < share.keys; i++) {
+      if (share.codes[l][i] !== model.codes[l][i]) diffs.push([l, i, share.codes[l][i]]);
+    }
+  }
+  if (diffs.length === 0) {
+    showSaveMessage("info", "リンクのキーマップは、いまの内容と同じです。");
+    return;
+  }
+  busy = true;
+  updateButtons();
+  clearSaveMessage();
+  let done = 0;
+  let failure = "";
+  try {
+    for (const [l, i, code] of diffs) {
+      try {
+        await request("SET " + l + " " + i + " " + hex4(code));
+      } catch (e) {
+        if (transport === null) return; // 切断が原因のときは onClosed 側で表示済み
+        const where = "レイヤー " + l + " / キー " + i;
+        failure = e instanceof ProtocolError && e.code === "BADARG"
+          ? where + ": デバイスが " + keycodeHex(code) + " に対応していません。"
+          : where + ": " + describeError(e);
+        break;
+      }
+      model.codes[l][i] = code;
+      const cap = model.caps[l][i];
+      if (cap) fillCap(cap, l, i, code);
+      done++;
+    }
+  } finally {
+    busy = false;
+    updateButtons();
+  }
+  refreshDirtyMarks();
+  await tryRefreshSaved();
+  if (failure === "") {
+    showSaveMessage("ok", "リンクのキーマップを反映しました(" + done + " 個のキーが変わりました)。「SAVE」を押すと保存されます。");
+  } else {
+    showSaveMessage("fail", "リンクの反映を、途中でやめました(" + done + " / " + diffs.length + " 個)。\n" + failure);
+  }
+}
+
 /* ---- 上の1行: 「…」メニューと、確認の小窓 ---- */
 
 let detailOpen = false;
@@ -2510,6 +2611,19 @@ function init() {
     setWelcome("unsupported");
     return;
   }
+  // リンク(#k1=...)で開いたとき: 接続を待って、反映する
+  if (readShareHash() === "wait") showSaveMessage("info", "リンクのキーマップがあります。キーボードをつなぐと、反映します。");
+  window.addEventListener("hashchange", () => {
+    if (readShareHash() === "wait") {
+      if (canOperate()) applyPendingShare();
+      else if (model === null) showSaveMessage("info", "リンクのキーマップがあります。キーボードをつなぐと、反映します。");
+      else { // 通信中: 待たずに、やめる
+        pendingShare = null;
+        clearShareHash();
+        showSaveMessage("info", "通信中のため、リンクのキーマップは反映しませんでした。終わってから、もう一度開いてください。");
+      }
+    }
+  });
   window.addEventListener("resize", relayoutStage);
   els.connect.addEventListener("click", connect);
   els.reload.addEventListener("click", () => loadAll(model ? model.current : 0));
