@@ -363,6 +363,7 @@ main > .panel:first-of-type { border-top: 0; margin-top: 0; }
 .lk.on { background: var(--sel-bg); border-color: var(--sel-edge); }
 .lk.on:disabled { background: var(--sel-bg); color: var(--ink); }
 .lk-label { margin-top: 12px; font-size: 12px; color: var(--muted); }
+.lk-label[hidden], .ltargets[hidden] { display: none; }
 .ltargets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .lt {
   display: flex;

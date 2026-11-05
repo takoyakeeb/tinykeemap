@@ -206,6 +206,9 @@ const KEYCODE_ROWS = [
   [0x00E5, "KC_RIGHT_SHIFT", "KC_RSFT", "右 Shift", "modifier"],
   [0x00E6, "KC_RIGHT_ALT", "KC_RALT", "右 Alt", "modifier"],
   [0x00E7, "KC_RIGHT_GUI", "KC_RGUI", "右 GUI", "modifier"],
+  // 次・前のレイヤー(takoyakeeb 独自。docs/protocol.md §2。fw 0.5.0 以降)。「キー」の一覧には出さず、「レイヤー切り替え」で選ぶ
+  [0x7E00, "LAYER_NEXT", "", "次のレイヤー", "layer"],
+  [0x7E01, "LAYER_PREV", "", "前のレイヤー", "layer"],
 ];
 
 const KEYCODES = KEYCODE_ROWS.map(([code, name, alias, label, group]) => ({ code, name, alias, label, group }));
@@ -243,6 +246,19 @@ let deviceLayers = 0;
 
 function setDeviceLayers(n) {
   deviceLayers = Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+// 次・前のレイヤー(0x7E00・0x7E01)。INFO に cfg=1 があるファーム(0.5.0 以降)だけが対応している。
+// 対応していないファームでは、選ぶ欄に出さない(入力すれば送れる。拒否されたら ERR BADARG)
+const LAYER_STEP_CODES = new Set([0x7e00, 0x7e01]);
+let deviceLayerStep = false;
+
+function setDeviceLayerStep(on) {
+  deviceLayerStep = on === true;
+}
+
+function isLayerStep(code) {
+  return LAYER_STEP_CODES.has(code);
 }
 
 // 値がレイヤー切り替えなら { kind, n } を返す(違えば null)
@@ -384,7 +400,7 @@ function parseKeycodeText(text) {
 // 一覧の絞り込み。空白で区切った言葉が、すべて(値・名前・別名・表示名のどれかに)含まれる項目を返す
 function searchKeycodes(text) {
   const words = String(text).toLowerCase().split(/\s+/).filter(Boolean);
-  const all = KEYCODES.concat(layerKeycodes());
+  const all = KEYCODES.filter((k) => deviceLayerStep || !isLayerStep(k.code)).concat(layerKeycodes());
   if (words.length === 0) return all;
   return all.filter((k) => {
     const hay = (keycodeHex(k.code) + " " + k.name + " " + k.alias + " " + k.label).toLowerCase();
@@ -432,6 +448,12 @@ function splitModified(code) {
 function capFace(code, compact) {
   if (code === 0x0000) return { small: "", main: "無効", kind: "none" };
   if (code === 0x0001) return { small: "", main: "透過", kind: "trans" };
+  if (isLayerStep(code)) {
+    const next = code === 0x7e00;
+    return compact
+      ? { small: "", main: next ? "次L" : "前L", kind: "normal" }
+      : { small: "レイヤー", main: next ? "次" : "前", kind: "normal" };
+  }
   const lk = decodeLayerKey(code);
   if (lk) {
     const out = deviceLayers > 0 && lk.n >= deviceLayers;
@@ -484,6 +506,7 @@ function keyCategory(k) {
     case "basic": return "basic";
     case "modifier": return "basic";
     case "symbols": return "sym";
+    case "layer": return "layer"; // 次・前のレイヤー。「キー」の一覧のカテゴリにはない(「レイヤー切り替え」で選ぶ)
     case "function": return k.code <= 0x0045 ? "fn" : "other"; // F1〜F12 は 0x003A〜0x0045
     case "navigation":
       if (ARROW_CODES.has(k.code)) return "arrow";

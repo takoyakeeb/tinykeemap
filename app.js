@@ -504,6 +504,7 @@ function clearResults() {
   model = null;
   updateUnsavedBanner();
   setDeviceLayers(0); // 接続していない間は、レイヤー数が分からない
+  setDeviceLayerStep(false);
   renderPicker();
   els.kcHex.value = "";
   updatePreview();
@@ -581,6 +582,7 @@ function capNote(code) {
   if (code === 0x0001) return "透過";
   const k = findKeycode(code);
   if (!k) return "(一覧にない値)";
+  if (isLayerStep(code)) return k.label;
   if (k.cap) return k.cap; // 修飾キー付きは「Shift+A」のように短く
   // レイヤー切り替えは、表示名が長いので、MO(1) のような名前を出す
   if (k.group === "layer") return k.warn ? k.name + "(範囲外)" : k.name;
@@ -740,6 +742,7 @@ async function loadAll(startLayer) {
     renderInfo(info, rawInfo, layoutResult);
     // レイヤー切り替え(MO(n) / TG(n) / TO(n))の一覧を、このデバイスのレイヤー数に合わせて作り直す
     setDeviceLayers(info.layers);
+    setDeviceLayerStep(info.cfg);
     renderPicker();
 
     const warnings = [];
@@ -875,6 +878,11 @@ const LAYER_KIND_UI = {
   TG: { title: "押すたびに切り替え", desc: "もう一度押すと、元に戻ります" },
   TO: { title: "そのレイヤーへ移る", desc: "そのレイヤーだけを有効にします。押している間の MO は残ります" },
 };
+// 次・前のレイヤー: [値, ボタンの名前, 説明]
+const LAYER_STEP_UI = [
+  [0x7e00, "次のレイヤー", "1つ先へ(空のレイヤーは飛ばす)"],
+  [0x7e01, "前のレイヤー", "1つ前へ(空のレイヤーは飛ばす)"],
+];
 let lkindDefault = "MO"; // keycode がレイヤー切り替えでないときに、切り替え先のボタンを押したときの種類
 let ltargetDefault = 1; // 同じく、種類のボタンを押したときの切り替え先
 
@@ -911,6 +919,27 @@ function buildLayerPick(usable) {
     btn.append(head, desc);
     els.lkKinds.appendChild(btn);
   }
+  // 次・前のレイヤー(対応しているファームだけ。切り替え先は選ばない)
+  if (deviceLayerStep) {
+    for (const [code, name, text] of LAYER_STEP_UI) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lk";
+      btn.dataset.step = String(code);
+      btn.disabled = !usable;
+      const head = document.createElement("span");
+      head.className = "lk-head";
+      const title = document.createElement("span");
+      title.className = "lk-title";
+      title.textContent = name;
+      head.append(title);
+      const desc = document.createElement("span");
+      desc.className = "lk-desc";
+      desc.textContent = text;
+      btn.append(head, desc);
+      els.lkKinds.appendChild(btn);
+    }
+  }
   const names = model && model.layout ? model.layout.layerNames : [];
   for (let n = 0; n < deviceLayers && n <= LAYER_KEY_MAX; n++) {
     const btn = document.createElement("button");
@@ -939,8 +968,14 @@ function updateLayerPick() {
   const lk = p.ok ? decodeLayerKey(p.code) : null;
   const usable = canOperate();
   const effectiveKind = lk ? lk.kind.name : lkindDefault;
+  const step = p.ok && isLayerStep(p.code);
+  // 次・前のレイヤーのときは、切り替え先を出さない
+  els.lkTargets.hidden = step;
+  els.lkTargets.previousElementSibling.hidden = step;
   els.lkKinds.querySelectorAll(".lk").forEach((b) => {
-    const on = lk !== null && b.dataset.kind === lk.kind.name;
+    const on = b.dataset.step !== undefined
+      ? step && Number(b.dataset.step) === p.code
+      : lk !== null && b.dataset.kind === lk.kind.name;
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
   });
@@ -951,6 +986,12 @@ function updateLayerPick() {
     b.setAttribute("aria-pressed", on ? "true" : "false");
     b.disabled = !usable || (n === 0 && effectiveKind !== "TO");
   });
+}
+
+// 次・前のレイヤーのボタン
+function onLayerStepClick(code) {
+  els.kcHex.value = keycodeHex(code);
+  updatePreview();
 }
 
 // 種類のボタン: 切り替え先は、いまの値を引き継ぐ(L0 は TO 以外で選べないので、そのときは L1)
@@ -1032,7 +1073,7 @@ function onModToggle() {
 // 選んだマスの keycode に合わせて、種類のタブとカテゴリを切り替える(名前の検索は空にする)
 function syncPickerTo(code) {
   els.kcSearch.value = "";
-  if (decodeLayerKey(code)) {
+  if (decodeLayerKey(code) || isLayerStep(code)) {
     pickKind = "layer";
   } else {
     pickKind = "key";
@@ -1768,7 +1809,9 @@ function init() {
   });
   els.lkKinds.addEventListener("click", (ev) => {
     const b = ev.target.closest(".lk");
-    if (b && !b.disabled) onLayerKindClick(b.dataset.kind);
+    if (!b || b.disabled) return;
+    if (b.dataset.step !== undefined) onLayerStepClick(Number(b.dataset.step));
+    else onLayerKindClick(b.dataset.kind);
   });
   els.lkTargets.addEventListener("click", (ev) => {
     const b = ev.target.closest(".lt");
